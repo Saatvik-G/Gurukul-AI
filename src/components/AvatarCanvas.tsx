@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react";
 interface AvatarCanvasProps {
   amplitude: number; // 0.0 to 1.0 (Web Audio API AnalyserNode)
   isSpeaking: boolean;
+  isThinking?: boolean;
   teacherMood?: "welcoming" | "explaining" | "encouraging" | "correcting";
   size?: number;
 }
@@ -12,6 +13,7 @@ interface AvatarCanvasProps {
 export const AvatarCanvas: React.FC<AvatarCanvasProps> = ({
   amplitude,
   isSpeaking,
+  isThinking = false,
   teacherMood = "explaining",
   size = 200,
 }) => {
@@ -213,11 +215,25 @@ export const AvatarCanvas: React.FC<AvatarCanvasProps> = ({
         <div className="mt-2 text-[11px] font-body text-[#8E9C88] flex items-center gap-1.5">
           <span
             className={`w-2 h-2 rounded-full ${
-              isSpeaking ? "bg-[#E3A23B] animate-pulse" : "bg-[#8E9C88]"
+              isSpeaking
+                ? "bg-[#E3A23B] animate-pulse"
+                : isThinking
+                ? "bg-[#E3A23B] animate-ping"
+                : "bg-[#8E9C88]"
             }`}
           />
-          <span className={isSpeaking ? "text-[#E3A23B] font-medium" : "text-[#8E9C88]"}>
-            {isSpeaking ? "Speaking" : "Listening"}
+          <span
+            className={
+              isSpeaking || isThinking
+                ? "text-[#E3A23B] font-medium"
+                : "text-[#8E9C88]"
+            }
+          >
+            {isSpeaking
+              ? "Speaking"
+              : isThinking
+              ? "Writing on board..."
+              : "Listening"}
           </span>
         </div>
       </div>

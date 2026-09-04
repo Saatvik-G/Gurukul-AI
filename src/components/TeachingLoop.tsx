@@ -38,11 +38,26 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
   const [currentConceptIndex, setCurrentConceptIndex] = useState<number>(
     session.current_concept_index || 0
   );
-  const [currentExplanation, setCurrentExplanation] = useState<ExplanationResponse | null>(null);
+
+  // Pre-seed current explanation so chalkboard visuals and questions render on frame 0
+  const initialConcept = lessonPlan.concepts[session.current_concept_index || 0] || lessonPlan.concepts[0];
+  const [currentExplanation, setCurrentExplanation] = useState<ExplanationResponse | null>(() => {
+    if (!initialConcept) return null;
+    return {
+      spoken_text: "",
+      visual_type: initialConcept.visual_type || "diagram",
+      visual_content: initialConcept.visual_content || "",
+      citations: [initialConcept.name],
+      concept_name: initialConcept.name,
+      checkpoint_question: initialConcept.checkpoint_question || "",
+      interaction_type: initialConcept.interaction_type || "question",
+    };
+  });
+
   const [studentAnswer, setStudentAnswer] = useState<string>("");
   const [lastEvaluation, setLastEvaluation] = useState<EvaluationResult | null>(null);
   const [retrievedChunks, setRetrievedChunks] = useState<any[]>([]);
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isProcessing, setIsProcessing] = useState<boolean>(true);
   const [teacherMood, setTeacherMood] = useState<
     "welcoming" | "explaining" | "encouraging" | "correcting"
   >("explaining");
@@ -85,17 +100,23 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
     };
   }, []);
 
-  // Voice synthesis player
+  // Fast Voice synthesis player with instant timeout fallback
   const speakText = async (text: string, lang: Language) => {
     if (isMuted || !text) return;
 
     try {
       setIsSpeaking(true);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1200);
+
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, language: lang }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
+
       const data = await res.json();
 
       if (data.audioBase64 && audioRef.current) {
@@ -119,7 +140,6 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
         fallbackWebSpeech(text, lang);
       }
     } catch (e) {
-      console.warn("TTS fetch error, using Web Speech fallback:", e);
       fallbackWebSpeech(text, lang);
     }
   };
@@ -360,6 +380,7 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
               <AvatarCanvas
                 amplitude={amplitude}
                 isSpeaking={isSpeaking}
+                isThinking={isProcessing && !isSpeaking}
                 teacherMood={teacherMood}
                 size={160}
               />
@@ -370,6 +391,8 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
               <CaptionsDisplay
                 fullText={currentExplanation?.spoken_text || ""}
                 isSpeaking={isSpeaking}
+                isLoading={isProcessing && !currentExplanation?.spoken_text}
+                conceptName={currentConcept.name}
                 language={session.language}
                 isReexplanation={currentExplanation?.is_reexplanation}
                 onReplay={() =>

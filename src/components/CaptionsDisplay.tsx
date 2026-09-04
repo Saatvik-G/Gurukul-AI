@@ -8,6 +8,8 @@ interface CaptionsDisplayProps {
   onReplay?: () => void;
   language?: "en" | "hi";
   isReexplanation?: boolean;
+  isLoading?: boolean;
+  conceptName?: string;
 }
 
 export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
@@ -16,6 +18,8 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
   onReplay,
   language = "en",
   isReexplanation = false,
+  isLoading = false,
+  conceptName,
 }) => {
   const [displayedLength, setDisplayedLength] = useState(0);
   const [isWiping, setIsWiping] = useState(false);
@@ -43,7 +47,7 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
 
     setDisplayedLength(0);
     const totalChars = fullText.length;
-    const stepTime = 30;
+    const stepTime = 25;
     const charsPerStep = Math.max(1, Math.ceil(totalChars / (stepTime * 5)));
 
     const interval = setInterval(() => {
@@ -59,6 +63,29 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
 
     return () => clearInterval(interval);
   }, [fullText, isSpeaking]);
+
+  if (!fullText && isLoading) {
+    return (
+      <div className="w-full p-5 border border-[#8E9C88] bg-[#EFE9DA] text-[#2A2A26] rounded-sm relative overflow-hidden animate-pulse">
+        <div className="flex items-center justify-between pb-2 mb-3 border-b border-[#8E9C88]/30 text-xs font-body">
+          <span className="font-semibold text-[#2A2A26]">
+            {language === "hi" ? "गुरु व्याख्या" : "Guru Explanation"}
+          </span>
+          <span className="text-[11px] text-[#E3A23B] font-bold">
+            {language === "hi" ? "तैयार हो रहा है..." : "Writing on slate..."}
+          </span>
+        </div>
+        <div className="flex items-center gap-3 py-3 text-sm font-body text-[#2A2A26]">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#E3A23B] animate-ping shrink-0" />
+          <span className="text-[#2A2A26]/85">
+            {language === "hi"
+              ? `"${conceptName || "अवधारणा"}" के लिए मुख्य बिंदु और सादृश्य तैयार किए जा रहे हैं...`
+              : `Structuring core intuition and physical models for "${conceptName || "this concept"}"...`}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   if (!fullText) return null;
 
