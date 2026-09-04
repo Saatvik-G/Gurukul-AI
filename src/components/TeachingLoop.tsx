@@ -1,20 +1,6 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import {
-  AlertCircle,
-  ArrowRight,
-  Brain,
-  CheckCircle2,
-  HelpCircle,
-  Mic,
-  MicOff,
-  RotateCcw,
-  Send,
-  Sparkles,
-  Volume2,
-  VolumeX,
-} from "lucide-react";
 import { AudioAmplitudeTracker } from "@/lib/audio-analyser";
 import {
   ConceptPlan,
@@ -28,6 +14,9 @@ import {
 } from "@/lib/types";
 import { AvatarCanvas } from "./AvatarCanvas";
 import { CaptionsDisplay } from "./CaptionsDisplay";
+import { ChalkPathProgress } from "./ChalkPathProgress";
+import { ChalkWavyLine } from "./ChalkWavyLine";
+import { ConceptMapGraph } from "./ConceptMapGraph";
 import { StateMachineInspector } from "./StateMachineInspector";
 import { VisualRenderer } from "./VisualRenderer";
 
@@ -57,6 +46,12 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
   const [teacherMood, setTeacherMood] = useState<
     "welcoming" | "explaining" | "encouraging" | "correcting"
   >("explaining");
+  const [conceptMasteries, setConceptMasteries] = useState<Record<number, "turmeric" | "sindoor" | "moss">>(
+    session.metadata?.conceptMasteries || {}
+  );
+  const [priorMemoryCallback, setPriorMemoryCallback] = useState<string | null>(
+    lessonPlan.prior_memory_callback || null
+  );
 
   // Voice & Audio Analyser State
   const [amplitude, setAmplitude] = useState<number>(0);
@@ -71,7 +66,7 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
   const currentConcept: ConceptPlan =
     lessonPlan.concepts[currentConceptIndex] || lessonPlan.concepts[0];
 
-  // Initialize Audio Amplitude Tracker
+  // Initialize Web Audio Amplitude Tracker
   useEffect(() => {
     trackerRef.current = new AudioAmplitudeTracker();
 
@@ -90,13 +85,12 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
     };
   }, []);
 
-  // Play TTS audio or Web Speech API fallback
+  // Voice synthesis player
   const speakText = async (text: string, lang: Language) => {
     if (isMuted || !text) return;
 
     try {
       setIsSpeaking(true);
-      // 1. Try Google Cloud TTS backend
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -108,7 +102,6 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
         const audioBlobUrl = `data:${data.mimeType};base64,${data.audioBase64}`;
         audioRef.current.src = audioBlobUrl;
 
-        // Connect analyser to audio element on first play
         if (trackerRef.current) {
           trackerRef.current.init(audioRef.current);
         }
@@ -131,7 +124,6 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
     }
   };
 
-  // Client Web Speech Synthesis fallback
   const fallbackWebSpeech = (text: string, lang: Language) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
       setIsSpeaking(false);
@@ -142,12 +134,11 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
     utterance.lang = lang === "hi" ? "hi-IN" : "en-US";
     utterance.rate = 1.0;
 
-    // Simulate mouth amplitude rhythm for fallback
     let simInterval: any;
     utterance.onstart = () => {
       setIsSpeaking(true);
       simInterval = setInterval(() => {
-        setAmplitude(0.2 + Math.random() * 0.6);
+        setAmplitude(0.2 + Math.random() * 0.5);
       }, 100);
     };
 
@@ -166,7 +157,7 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
     window.speechSynthesis.speak(utterance);
   };
 
-  // Start Explanation for the Current Concept
+  // Trigger Explanation for the Concept
   const triggerExplanation = async (conceptIdx = currentConceptIndex) => {
     setIsProcessing(true);
     setTeacherMood("explaining");
@@ -186,8 +177,17 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
       if (data.explanation) {
         setCurrentExplanation(data.explanation);
         setRetrievedChunks(data.retrievedChunks || []);
+        if (data.conceptMasteries) setConceptMasteries(data.conceptMasteries);
+        if (data.priorMemoryCallback) setPriorMemoryCallback(data.priorMemoryCallback);
         setCurrentState("questioning");
-        speakText(data.explanation.spoken_text, session.language);
+
+        // If this is the start and there is a prior memory callback, weave it in
+        const speechLine =
+          conceptIdx === 0 && priorMemoryCallback
+            ? `${priorMemoryCallback} ${data.explanation.spoken_text}`
+            : data.explanation.spoken_text;
+
+        speakText(speechLine, session.language);
       }
     } catch (e) {
       console.error("Failed to fetch explanation:", e);
@@ -196,7 +196,6 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
     }
   };
 
-  // Trigger on initial mount or concept change
   useEffect(() => {
     triggerExplanation(currentConceptIndex);
   }, [currentConceptIndex]);
@@ -226,8 +225,9 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
 
       if (data.evaluation) {
         setLastEvaluation(data.evaluation);
+        if (data.conceptMasteries) setConceptMasteries(data.conceptMasteries);
 
-        // BRANCH A: INCORRECT -> RE-EXPLAINING WITH NOVEL ANALOGY
+        // BRANCH A: INCORRECT / FEYNMAN GAPS -> RE-EXPLAINING
         if (!data.evaluation.correct && data.reExplanation) {
           setCurrentState("reexplaining");
           setTeacherMood("correcting");
@@ -252,7 +252,7 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
               const nextIdx = data.nextConceptIndex ?? currentConceptIndex + 1;
               setCurrentConceptIndex(nextIdx);
             }
-          }, 2400);
+          }, 2200);
         }
       }
     } catch (e) {
@@ -262,14 +262,14 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
     }
   };
 
-  // Speech Recognition (Speech-to-text mic input)
+  // Voice Input via Web Speech API (Part 4)
   const toggleSpeechRecognition = () => {
     if (typeof window === "undefined") return;
     const SpeechRecognitionClass =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognitionClass) {
-      alert("Speech recognition is not supported in this browser. Please use text input.");
+      alert("Speech recognition is not supported in this browser. Please type your answer.");
       return;
     }
 
@@ -282,13 +282,14 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
       const recognition = new SpeechRecognitionClass();
       recognition.lang = session.language === "hi" ? "hi-IN" : "en-US";
       recognition.continuous = false;
-      recognition.interimResults = false;
+      recognition.interimResults = true;
 
       recognition.onstart = () => setIsListening(true);
       recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setStudentAnswer((prev) => (prev ? `${prev} ${transcript}` : transcript));
-        setIsListening(false);
+        const transcript = Array.from(event.results)
+          .map((r: any) => r[0].transcript)
+          .join(" ");
+        setStudentAnswer(transcript);
       };
       recognition.onerror = () => setIsListening(false);
       recognition.onend = () => setIsListening(false);
@@ -301,194 +302,233 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
   };
 
   const isHi = session.language === "hi";
+  const isFeynmanMode = currentConcept.interaction_type === "feynman";
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
-      {/* Hidden audio element for Web Audio API AnalyserNode */}
+    <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-5 font-body">
       <audio ref={audioRef} className="hidden" crossOrigin="anonymous" />
 
-      {/* Progress & Breadcrumbs Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 rounded-2xl bg-slate-900/80 border border-slate-800 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-indigo-600/30 text-indigo-400 font-bold text-sm border border-indigo-500/40">
-            {currentConceptIndex + 1}
-          </span>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-bold text-slate-100 text-sm sm:text-base truncate">
-                {currentConcept.name}
-              </h3>
-              {currentConcept.day && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  Day {currentConcept.day}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-slate-400">
-              {isHi
-                ? `अवधारणा ${currentConceptIndex + 1} / ${lessonPlan.concepts.length}`
-                : `Concept ${currentConceptIndex + 1} of ${lessonPlan.concepts.length} • ${
-                    currentConcept.depth
-                  } depth`}
-            </p>
+      {/* Top Chalkboard Sequence Path */}
+      <div className="border border-[#8E9C88]/40 bg-[#1A2B22] p-3 rounded-sm">
+        <div className="flex items-center justify-between mb-1 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="font-serif-heading text-sm font-bold text-[#F3EFE3]">
+              {currentConcept.name}
+            </span>
+            {currentConcept.day && (
+              <span className="text-[10px] px-1.5 py-0.5 bg-[#E3A23B] text-[#2A2A26] font-bold rounded-xs">
+                Day {currentConcept.day}
+              </span>
+            )}
+            {isFeynmanMode && (
+              <span className="text-[10px] px-1.5 py-0.5 bg-[#B5482F] text-[#F3EFE3] font-bold rounded-xs">
+                Feynman Mode
+              </span>
+            )}
           </div>
-        </div>
 
-        {/* Mute Audio Toggle */}
-        <div className="flex items-center gap-2">
           <button
             onClick={() => setIsMuted(!isMuted)}
-            className={`p-2 rounded-xl text-xs flex items-center gap-1.5 transition ${
-              isMuted
-                ? "bg-red-500/20 text-red-400 border border-red-500/30"
-                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-            }`}
+            className="text-[11px] text-[#8E9C88] hover:text-[#F3EFE3] underline underline-offset-2"
           >
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            <span>{isMuted ? (isHi ? "ध्वनि बंद" : "Unmute") : isHi ? "ध्वनि चालू" : "Mute"}</span>
+            {isMuted ? "Unmute voice" : "Mute voice"}
           </button>
         </div>
+
+        <ChalkPathProgress
+          concepts={lessonPlan.concepts}
+          currentIndex={currentConceptIndex}
+          masteries={conceptMasteries}
+        />
       </div>
 
-      {/* Main Teaching Stage: Avatar + Captions (Left) & Visual Aid (Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Avatar & Spoken Captions */}
-        <div className="lg:col-span-5 flex flex-col items-center gap-4">
-          {/* Animated Teacher Avatar */}
-          <div className="w-full flex justify-center py-2">
-            <AvatarCanvas
-              amplitude={amplitude}
-              isSpeaking={isSpeaking}
-              teacherMood={teacherMood}
-              size={240}
-            />
-          </div>
-
-          {/* Synced On-screen Captions */}
-          <CaptionsDisplay
-            fullText={currentExplanation?.spoken_text || ""}
-            isSpeaking={isSpeaking}
-            language={session.language}
-            isReexplanation={currentExplanation?.is_reexplanation}
-            onReplay={() =>
-              currentExplanation?.spoken_text &&
-              speakText(currentExplanation.spoken_text, session.language)
-            }
-          />
-        </div>
-
-        {/* Right Column: Visual Renderer & Checkpoint Question Box */}
-        <div className="lg:col-span-7 flex flex-col gap-4">
-          {/* Dynamic Visual Aid Component */}
-          <div className="flex-1 min-h-[260px]">
-            <VisualRenderer
-              type={currentExplanation?.visual_type || currentConcept.visual_type || "none"}
-              content={currentExplanation?.visual_content || currentConcept.visual_content || ""}
-              conceptName={currentConcept.name}
-            />
-          </div>
-
-          {/* Interactive Checkpoint Question Box */}
-          <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl backdrop-blur-md">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-400 mb-2">
-              <HelpCircle className="w-4 h-4" />
-              <span>
-                {currentExplanation?.is_reexplanation
-                  ? isHi
-                    ? "पुनर्व्याख्या परीक्षण प्रश्न"
-                    : "Misconception Checkpoint Question"
-                  : isHi
-                  ? "जांच प्रश्न (Checkpoint Question)"
-                  : "Conceptual Checkpoint Question"}
-              </span>
+      {/* Main Layout: Chalkboard Board (Left ~70%) + Notebook Margin (Right ~30%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Left Column (Chalkboard Teaching Stage) */}
+        <div className="lg:col-span-8 space-y-4">
+          {/* Avatar Window + Spoken Text */}
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-start">
+            {/* Cut Inset Window Avatar */}
+            <div className="sm:col-span-4 flex justify-center">
+              <AvatarCanvas
+                amplitude={amplitude}
+                isSpeaking={isSpeaking}
+                teacherMood={teacherMood}
+                size={160}
+              />
             </div>
 
-            <p className="text-sm sm:text-base font-medium text-slate-100 mb-4 leading-relaxed">
+            {/* Pinned Paper Explanation Panel */}
+            <div className="sm:col-span-8">
+              <CaptionsDisplay
+                fullText={currentExplanation?.spoken_text || ""}
+                isSpeaking={isSpeaking}
+                language={session.language}
+                isReexplanation={currentExplanation?.is_reexplanation}
+                onReplay={() =>
+                  currentExplanation?.spoken_text &&
+                  speakText(currentExplanation.spoken_text, session.language)
+                }
+              />
+            </div>
+          </div>
+
+          {/* Dynamic Visual Aid */}
+          <VisualRenderer
+            type={currentExplanation?.visual_type || currentConcept.visual_type || "none"}
+            content={currentExplanation?.visual_content || currentConcept.visual_content || ""}
+            conceptName={currentConcept.name}
+          />
+
+          {/* Checkpoint Question & Student Paper Note Answer */}
+          <div className="border border-[#8E9C88]/50 bg-[#1B2D24] p-5 rounded-sm">
+            {/* Question Label */}
+            <div className="text-xs text-[#E3A23B] font-serif-heading font-bold mb-1">
+              {isFeynmanMode
+                ? isHi
+                  ? "फेनमैन विधि: अपनी समझ से समझाइए"
+                  : "Feynman Method: Explain in your own words"
+                : isHi
+                ? "जांच प्रश्न"
+                : "Checkpoint Question"}
+            </div>
+            <ChalkWavyLine className="w-24 mb-2 opacity-75" />
+
+            {/* Question Text */}
+            <p className="text-base text-[#F3EFE3] font-serif-heading mb-4 leading-relaxed">
               {currentExplanation?.checkpoint_question ||
                 currentConcept.checkpoint_question ||
                 "Explain the core principle in your own words."}
             </p>
 
-            {/* Answer Input Form */}
+            {/* Student Torn Paper Note Answer Form */}
             <form onSubmit={handleAnswerSubmit} className="space-y-3">
-              <div className="relative flex items-center">
-                <input
-                  type="text"
+              <div className="torn-note p-3">
+                <textarea
+                  rows={2}
                   value={studentAnswer}
                   onChange={(e) => setStudentAnswer(e.target.value)}
                   placeholder={
-                    isHi
-                      ? "अपना उत्तर यहाँ लिखें या माइक का उपयोग करें..."
-                      : "Type your answer or speak to your AI Guru..."
+                    isFeynmanMode
+                      ? isHi
+                        ? "इस अवधारणा को अपनी भाषा में समझाइए, जैसे आप किसी नौसिखिए को पढ़ा रहे हों..."
+                        : "Explain this concept back to me in your own words, as if teaching someone new..."
+                      : isHi
+                      ? "अपना उत्तर यहाँ लिखें या बोलकर दर्ज करें..."
+                      : "Type your answer or speak with the microphone..."
                   }
                   disabled={isProcessing}
-                  className="w-full pl-4 pr-24 py-3.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-100 placeholder-slate-500 text-sm outline-none transition disabled:opacity-50"
+                  className="w-full bg-transparent text-[#2A2A26] placeholder-[#8E9C88] text-sm outline-none resize-none font-body"
                 />
-
-                <div className="absolute right-2 flex items-center gap-1.5">
-                  {/* Mic Speech-to-Text Button */}
-                  <button
-                    type="button"
-                    onClick={toggleSpeechRecognition}
-                    className={`p-2 rounded-lg transition ${
-                      isListening
-                        ? "bg-red-500 text-white animate-pulse"
-                        : "bg-slate-800 text-slate-400 hover:text-white"
-                    }`}
-                    title="Voice input"
-                  >
-                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  </button>
-
-                  {/* Submit Button */}
-                  <button
-                    type="submit"
-                    disabled={!studentAnswer.trim() || isProcessing}
-                    className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-indigo-600/30"
-                  >
-                    {isProcessing ? (
-                      <Sparkles className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
               </div>
 
-              {/* Instant feedback notification pill */}
-              {lastEvaluation && (
-                <div
-                  className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 transition-all ${
-                    lastEvaluation.correct
-                      ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-200"
-                      : "bg-amber-950/40 border-amber-500/40 text-amber-200"
+              {/* Action Bar */}
+              <div className="flex items-center justify-between pt-1">
+                {/* Speech Recognition Mic Button (Part 4) */}
+                <button
+                  type="button"
+                  onClick={toggleSpeechRecognition}
+                  className={`text-xs px-3 py-1.5 border transition font-body flex items-center gap-1.5 rounded-xs ${
+                    isListening
+                      ? "bg-[#B5482F] text-[#F3EFE3] border-[#B5482F]"
+                      : "border-[#8E9C88] text-[#F3EFE3] hover:border-[#E3A23B]"
                   }`}
                 >
-                  {lastEvaluation.correct ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <span>{isListening ? "Listening... click to stop" : "Speak answer"}</span>
+                </button>
+
+                {/* Submit button: Solid turmeric, ink text, sentence case */}
+                <button
+                  type="submit"
+                  disabled={!studentAnswer.trim() || isProcessing}
+                  className="text-xs font-bold px-4 py-2 bg-[#E3A23B] text-[#2A2A26] hover:bg-[#d4942d] disabled:opacity-40 disabled:cursor-not-allowed rounded-xs transition"
+                >
+                  {isProcessing
+                    ? isHi
+                      ? "जांच हो रही है..."
+                      : "Evaluating..."
+                    : currentExplanation?.is_reexplanation
+                    ? "Try another way"
+                    : "Answer"}
+                </button>
+              </div>
+
+              {/* Feedback Alert if present */}
+              {lastEvaluation && (
+                <div
+                  className={`p-3 text-xs border rounded-xs font-body ${
+                    lastEvaluation.correct
+                      ? "bg-[#EFE9DA] text-[#2A2A26] border-[#E3A23B]"
+                      : "bg-[#2A1813] text-[#F3EFE3] border-[#B5482F]"
+                  }`}
+                >
+                  <span className="font-bold mr-1.5">
+                    {lastEvaluation.correct ? "Understood:" : "Correction needed:"}
+                  </span>
+                  <span>{lastEvaluation.feedback}</span>
+                  {lastEvaluation.gaps && lastEvaluation.gaps.length > 0 && (
+                    <div className="mt-1 text-[#B5482F] text-[11px]">
+                      Identified gaps: {lastEvaluation.gaps.join("; ")}
+                    </div>
                   )}
-                  <div>
-                    <span className="font-bold mr-1">
-                      {lastEvaluation.correct
-                        ? isHi
-                          ? "उत्कृष्ट!"
-                          : "Correct!"
-                        : isHi
-                        ? "सुझाव:"
-                        : "Misconception Identified:"}
-                    </span>
-                    <span>{lastEvaluation.feedback}</span>
-                  </div>
                 </div>
               )}
             </form>
           </div>
         </div>
+
+        {/* Right Column (Notebook Margin Column ~30%) */}
+        <div className="lg:col-span-4 space-y-4">
+          {/* Part 3: Cross-Session Memory Callback Sticky Note */}
+          {priorMemoryCallback && (
+            <div className="sticky-pinned-note p-3 text-xs font-body rounded-xs relative">
+              <div className="font-serif-heading font-bold text-xs text-[#2A2A26] mb-1 flex items-center justify-between">
+                <span>Note from last session</span>
+                <span className="text-[10px] text-[#B5482F]">Memory callback</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-[#2A2A26]">
+                "{priorMemoryCallback}"
+              </p>
+            </div>
+          )}
+
+          {/* Part 5: Growing Concept Map Graph */}
+          <ConceptMapGraph
+            concepts={lessonPlan.concepts}
+            currentIndex={currentConceptIndex}
+            masteries={conceptMasteries}
+          />
+
+          {/* Ruled Notebook Margin Panel for Notes & Doubt Trail */}
+          <div className="notebook-ruled p-3.5 border border-[#8E9C88]/40 text-xs rounded-sm space-y-3 min-h-[160px]">
+            <div className="font-serif-heading font-bold text-xs border-b border-[#8E9C88]/30 pb-1 text-[#2A2A26]">
+              Margin Notes &amp; Doubt Trail
+            </div>
+
+            <div className="space-y-2 text-[11px] leading-snug text-[#2A2A26]">
+              <div>
+                <span className="font-medium">Active Topic:</span> {session.title}
+              </div>
+              <div>
+                <span className="font-medium">Teaching Level:</span> {currentConcept.depth}
+              </div>
+              <div>
+                <span className="font-medium">Checkpoint Mode:</span>{" "}
+                {isFeynmanMode ? "Feynman (own words)" : "Direct Conceptual"}
+              </div>
+
+              {lastEvaluation?.praise_point && (
+                <div className="p-2 bg-[#E6DEC9] border border-[#8E9C88]/30 rounded-xs text-[11px]">
+                  <span className="font-semibold text-[#2A2A26]">What you explained well:</span>{" "}
+                  {lastEvaluation.praise_point}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* State Machine Debug Inspector (Judges Transparency Panel) */}
+      {/* State Machine Inspector */}
       <div className="pt-2">
         <StateMachineInspector
           currentState={currentState}
@@ -499,6 +539,7 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
           lastEvaluation={lastEvaluation}
           targetDepth={currentConcept.depth || session.target_depth}
           language={session.language}
+          interactionType={currentConcept.interaction_type}
         />
       </div>
     </div>

@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import mermaid from "mermaid";
-import { Check, Code, Copy, GitBranch, Layers, Sigma, Milestone } from "lucide-react";
 import { VisualType } from "@/lib/types";
 
 interface VisualRendererProps {
@@ -16,11 +15,10 @@ interface VisualRendererProps {
 export const VisualRenderer: React.FC<VisualRendererProps> = ({
   type,
   content,
-  conceptName = "Concept Visual",
+  conceptName = "Board Visual",
 }) => {
   const [copied, setCopied] = useState(false);
   const mathRef = useRef<HTMLDivElement>(null);
-  const mermaidRef = useRef<HTMLDivElement>(null);
   const [mermaidSvg, setMermaidSvg] = useState<string>("");
 
   // LaTeX KaTeX rendering
@@ -43,16 +41,15 @@ export const VisualRenderer: React.FC<VisualRendererProps> = ({
       try {
         mermaid.initialize({
           startOnLoad: false,
-          theme: "dark",
-          securityLevel: "loose",
-          fontFamily: "inherit",
+          theme: "base",
           themeVariables: {
-            primaryColor: "#4f46e5",
-            primaryTextColor: "#ffffff",
-            primaryBorderColor: "#6366f1",
-            lineColor: "#818cf8",
-            secondaryColor: "#1e1b4b",
-            tertiaryColor: "#0f172a",
+            primaryColor: "#EFE9DA",
+            primaryTextColor: "#2A2A26",
+            primaryBorderColor: "#8E9C88",
+            lineColor: "#E3A23B",
+            secondaryColor: "#EFE9DA",
+            tertiaryColor: "#F3EFE3",
+            fontFamily: "Work Sans, sans-serif",
           },
         });
 
@@ -60,15 +57,13 @@ export const VisualRenderer: React.FC<VisualRendererProps> = ({
         const cleanGraph = content.trim().replace(/\\n/g, "\n");
         mermaid.render(id, cleanGraph).then((res) => {
           setMermaidSvg(res.svg);
-        }).catch((err) => {
-          console.warn("Mermaid render notice:", err);
-          // Fallback diagram
-          mermaid.render(id, "graph TD\n  A[Concept Principle] --> B[Processing] --> C[Output Result]").then((res) => {
+        }).catch(() => {
+          mermaid.render(id, "graph TD\n  A[Concept Principle] --> B[Mechanism] --> C[Outcome]").then((res) => {
             setMermaidSvg(res.svg);
           }).catch(() => {});
         });
       } catch (err) {
-        console.warn("Mermaid init error:", err);
+        console.warn("Mermaid error:", err);
       }
     }
   }, [type, content]);
@@ -81,82 +76,75 @@ export const VisualRenderer: React.FC<VisualRendererProps> = ({
 
   if (type === "none" || !content) {
     return (
-      <div className="h-full min-h-[220px] rounded-2xl bg-slate-900/60 border border-slate-800 flex flex-col items-center justify-center p-6 text-center text-slate-400">
-        <Layers className="w-10 h-10 text-indigo-400/50 mb-2 animate-pulse" />
-        <p className="text-sm font-medium text-slate-300">Grounded Conceptual Module</p>
-        <p className="text-xs text-slate-500 mt-1">Focus on audio &amp; interactive checkpoint questioning</p>
+      <div className="h-full min-h-[160px] p-4 bg-[#1B2D24] border border-[#8E9C88]/40 rounded-sm flex items-center justify-center text-xs text-[#8E9C88] font-body text-center">
+        Conceptual explanation in progress. Listen to the guru and follow on-screen notes.
       </div>
     );
   }
 
   return (
-    <div className="w-full rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl overflow-hidden backdrop-blur-md flex flex-col">
+    <div className="w-full border border-[#8E9C88] bg-[#EFE9DA] text-[#2A2A26] rounded-sm font-body overflow-hidden">
       {/* Visual Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-950 border-b border-slate-800">
-        <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
-          {type === "equation" && <Sigma className="w-4 h-4 text-pink-400" />}
-          {type === "diagram" && <GitBranch className="w-4 h-4 text-indigo-400" />}
-          {type === "code" && <Code className="w-4 h-4 text-emerald-400" />}
-          {type === "timeline" && <Milestone className="w-4 h-4 text-amber-400" />}
-          <span className="capitalize">{type} Visual Aid: {conceptName}</span>
-        </div>
+      <div className="flex items-center justify-between px-3 py-1.5 bg-[#E6DEC9] border-b border-[#8E9C88]/40 text-xs">
+        <span className="font-semibold text-[#2A2A26]">
+          {type === "equation" && "Mathematical Equation"}
+          {type === "diagram" && "Concept Diagram"}
+          {type === "code" && "Code Snippet"}
+          {type === "timeline" && "Sequence Timeline"}
+        </span>
 
         {type === "code" && (
           <button
             onClick={handleCopy}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 transition"
+            className="text-[11px] text-[#2A2A26] hover:text-[#E3A23B] underline underline-offset-2"
           >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copied ? "Copied" : "Copy"}</span>
+            {copied ? "Copied" : "Copy code"}
           </button>
         )}
       </div>
 
       {/* Visual Body */}
-      <div className="p-5 flex-1 flex items-center justify-center min-h-[240px] overflow-auto">
-        {/* EQUATION / LATEX */}
+      <div className="p-4 flex items-center justify-center min-h-[160px] overflow-x-auto text-[#2A2A26]">
+        {/* EQUATION */}
         {type === "equation" && (
-          <div className="text-center py-4 px-2 w-full overflow-x-auto text-xl text-slate-100">
+          <div className="text-center py-2 px-2 w-full text-lg">
             <div ref={mathRef} />
           </div>
         )}
 
-        {/* DIAGRAM / MERMAID */}
+        {/* DIAGRAM */}
         {type === "diagram" && (
-          <div className="w-full flex justify-center items-center py-2">
+          <div className="w-full flex justify-center py-1">
             {mermaidSvg ? (
               <div
                 dangerouslySetInnerHTML={{ __html: mermaidSvg }}
-                className="w-full flex justify-center [&>svg]:max-h-[280px] [&>svg]:w-auto"
+                className="w-full flex justify-center [&>svg]:max-h-[220px]"
               />
             ) : (
-              <div className="flex items-center gap-2 text-slate-400 text-xs animate-pulse">
-                <GitBranch className="w-4 h-4 text-indigo-400" />
-                <span>Rendering interactive diagram...</span>
-              </div>
+              <div className="text-xs text-[#8E9C88]">Rendering diagram...</div>
             )}
           </div>
         )}
 
-        {/* CODE BLOCK */}
+        {/* CODE */}
         {type === "code" && (
-          <pre className="w-full p-4 rounded-xl bg-slate-950 text-emerald-300 font-mono text-xs sm:text-sm overflow-x-auto border border-slate-800 leading-relaxed">
+          <pre className="w-full p-3 bg-[#22362B] text-[#F3EFE3] text-xs overflow-x-auto border border-[#8E9C88]/40 leading-relaxed rounded-sm">
             <code>{content}</code>
           </pre>
         )}
 
         {/* TIMELINE */}
         {type === "timeline" && (
-          <div className="w-full space-y-3 py-2">
+          <div className="w-full space-y-2 py-1">
             {content.split(/->|\n/).map((step, idx) => {
               const clean = step.trim();
               if (!clean) return null;
               return (
-                <div key={idx} className="flex items-start gap-3 p-3 rounded-xl bg-slate-950/70 border border-slate-800">
-                  <div className="flex items-center justify-center w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 font-bold text-xs border border-amber-500/40 shrink-0 mt-0.5">
+                <div key={idx} className="flex items-start gap-2.5 p-2 bg-[#E6DEC9] border border-[#8E9C88]/40 rounded-sm text-xs">
+                  <span className="w-5 h-5 rounded-full bg-[#E3A23B] text-[#2A2A26] font-bold text-[11px] flex items-center justify-center shrink-0">
                     {idx + 1}
-                  </div>
-                  <div className="text-xs sm:text-sm text-slate-200">{clean}</div>
+                  </span>
+                  <span className="text-[#2A2A26]">{clean}</span>
                 </div>
               );
             })}

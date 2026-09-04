@@ -42,6 +42,10 @@ export async function POST(req: NextRequest) {
     const currentIndex = session.current_concept_index || 0;
     const currentConcept: ConceptPlan = plan.concepts[currentIndex] || plan.concepts[0];
 
+    // Ensure session metadata exists
+    if (!session.metadata) session.metadata = {};
+    if (!session.metadata.conceptMasteries) session.metadata.conceptMasteries = {};
+
     // ========================================================================
     // ACTION: SWITCH LANGUAGE (Preserves progress & adapts context)
     // ========================================================================
@@ -61,6 +65,11 @@ export async function POST(req: NextRequest) {
     // STATE / ACTION: EXPLAINING
     // ========================================================================
     if (action === "explain" || session.state === "explaining") {
+      // Set upcoming concept node to moss if unattempted
+      if (!session.metadata.conceptMasteries[currentIndex]) {
+        session.metadata.conceptMasteries[currentIndex] = "moss";
+      }
+
       // 1. Retrieve RAG grounding chunks for this concept
       const queryText = `${currentConcept.name} ${currentConcept.checkpoint_question}`;
       const queryEmbedding = await generateEmbedding(queryText);
@@ -86,6 +95,8 @@ export async function POST(req: NextRequest) {
         totalConcepts: plan.concepts.length,
         concept: currentConcept,
         explanation,
+        conceptMasteries: session.metadata.conceptMasteries,
+        priorMemoryCallback: plan.prior_memory_callback || null,
         retrievedChunks: retrievedChunks.map((c) => ({
           concept_name: c.concept_name,
           definition: c.definition,
@@ -95,7 +106,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ========================================================================
-    // STATE / ACTION: EVALUATING & BRANCHING (Correct vs Misconception)
+    // STATE / ACTION: EVALUATING & BRANCHING (Supports Feynman Mode)
     // ========================================================================
     if (action === "evaluate" || session.state === "questioning" || session.state === "evaluating") {
       if (!studentAnswer) {
@@ -112,18 +123,20 @@ export async function POST(req: NextRequest) {
         .map((c) => `${c.concept_name}: ${c.definition} ${c.content_chunk}`)
         .join("\n");
 
-      // 1. Run diagnostic evaluation
+      // 1. Run diagnostic evaluation (handles standard Q&A and Feynman mode)
       const evalResult = await evaluateStudentAnswer({
         conceptName: currentConcept.name,
         question: currentConcept.checkpoint_question,
         studentAnswer,
         groundingContext,
         language: session.language,
+        interactionType: currentConcept.interaction_type || "question",
       });
 
-      // 2. BRANCH A: INCORRECT ANSWER -> RE-EXPLAINING WITH NOVEL ANALOGY
+      // 2. BRANCH A: INCORRECT / FEYNMAN GAPS -> RE-EXPLAINING WITH NOVEL ANALOGY
       if (!evalResult.correct) {
         session.state = "reexplaining";
+        session.metadata.conceptMasteries[currentIndex] = "sindoor";
         await saveSession(session);
 
         // Record weak concept in learner profile
@@ -133,7 +146,7 @@ export async function POST(req: NextRequest) {
         const reExplanation = await generateReExplanation({
           concept: currentConcept,
           previousExplanation: previousExplanation || "",
-          misconception: evalResult.misconception || "Conceptual gap",
+          misconception: evalResult.misconception || evalResult.gaps?.join(", ") || "Conceptual gap",
           studentAnswer,
           retrievedChunks,
           language: session.language,
@@ -146,12 +159,16 @@ export async function POST(req: NextRequest) {
           reExplanation,
           concept: currentConcept,
           currentConceptIndex: currentIndex,
+          conceptMasteries: session.metadata.conceptMasteries,
           isBranching: true,
         });
       }
 
       // 3. BRANCH B: CORRECT ANSWER -> ADAPTING DEPTH & PROGRESSING
       session.state = "adapting";
+      if (!session.metadata.conceptMasteries[currentIndex] || session.metadata.conceptMasteries[currentIndex] === "moss") {
+        session.metadata.conceptMasteries[currentIndex] = "turmeric";
+      }
       await saveSession(session);
 
       // Record strong concept in learner profile
@@ -171,6 +188,7 @@ export async function POST(req: NextRequest) {
           isLessonComplete: true,
           currentConceptIndex: nextIndex,
           totalConcepts: plan.concepts.length,
+          conceptMasteries: session.metadata.conceptMasteries,
         });
       }
 
@@ -189,6 +207,7 @@ export async function POST(req: NextRequest) {
         nextConceptIndex: nextIndex,
         totalConcepts: plan.concepts.length,
         nextConcept: plan.concepts[nextIndex],
+        conceptMasteries: session.metadata.conceptMasteries,
       });
     }
 

@@ -4,6 +4,7 @@ import {
   EvaluationResult,
   ExplanationResponse,
   ExtractedConceptChunk,
+  InteractionType,
   Language,
   LearnerDepth,
   LessonPlan,
@@ -109,7 +110,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 // ============================================================================
-// 3. LESSON PLANNER (Strict JSON Schema + Branching for 5m/20m/60m/7-day)
+// 3. LESSON PLANNER (With Feynman Mode & Cross-Session Memory Callback)
 // ============================================================================
 export async function generateLessonPlan({
   topicOrDocument,
@@ -138,10 +139,12 @@ export async function generateLessonPlan({
 
     const weakConceptsInstruction =
       priorWeakConcepts.length > 0
-        ? `IMPORTANT: The learner previously struggled with: ${priorWeakConcepts.join(", ")}. Dedicate the initial concept or revision segment to addressing these weak points before advancing.`
+        ? `IMPORTANT: The learner previously struggled with: ${priorWeakConcepts.join(", ")}.
+1. Generate an explicit "prior_memory_callback" field in natural spoken ${language === "hi" ? "Hindi" : "English"} referencing this exact history, e.g. "Last time, ${priorWeakConcepts[0]} tripped you up — let's start with a quick 2-minute refresher before we move on."
+2. Dedicate the initial concept to bridging this gap.`
         : "";
 
-    const prompt = `You are the master curriculum architect for Gurukul AI.
+    const prompt = `You are the master curriculum architect for Gurukul AI chalkboard classroom.
 Create an adaptive, structured lesson plan for:
 Topic / Source Material: """${topicOrDocument.slice(0, 10000)}"""
 Target Learner Level: ${depth}
@@ -150,14 +153,14 @@ Target Teaching Language: ${language === "hi" ? "Hindi (Devanagari)" : "English"
 ${weakConceptsInstruction}
 
 PLANNING RULES:
-1. For 5 minutes: Exactly 2 rapid high-impact core concepts.
-2. For 20 minutes: 3 to 4 modular progressive concepts.
-3. For 60 minutes: 5 to 6 deep concepts with practical application checkpoints.
-4. For 7 days: 7 concepts tagged with day: 1 through 7 representing a 1-week mastery trajectory.
-5. visual_type MUST be one of: "equation", "diagram", "code", "timeline", "none". Pick the most helpful visual aid for teaching each concept.
-6. checkpoint_question: A targeted, probing conceptual question to verify understanding.
+1. For 5 minutes: Exactly 2 core concepts.
+2. For 20 minutes: 3 to 4 concepts.
+3. For 60 minutes: 5 to 6 concepts.
+4. For 7 days: 7 concepts tagged with day: 1 through 7.
+5. FEYNMAN MODE: Mark roughly 1 in 3 concepts (especially core conceptual ones) with "interaction_type": "feynman". For these, the "checkpoint_question" MUST ask the student: "Explain [Concept] back to me in your own words, as if teaching someone who has never heard of it." For standard concepts, use "interaction_type": "question".
+6. visual_type MUST be one of: "equation", "diagram", "code", "timeline", "none".
 
-Return ONLY a JSON object matching this schema:
+Return ONLY a JSON object:
 {
   "concepts": [
     {
@@ -166,11 +169,13 @@ Return ONLY a JSON object matching this schema:
       "time_minutes": number,
       "visual_type": "equation" | "diagram" | "code" | "timeline" | "none",
       "checkpoint_question": "string",
+      "interaction_type": "question" | "feynman",
       "day": number
     }
   ],
   "total_time_minutes": number,
-  "language": "${language}"
+  "language": "${language}",
+  "prior_memory_callback": "string or null"
 }`;
 
     const result = await model.generateContent(prompt);
@@ -214,28 +219,35 @@ export async function generateGroundedExplanation({
       .map((c, i) => `[Chunk ${i + 1} - ${c.concept_name}]:\nDefinition: ${c.definition}\n${c.content_chunk}\nExamples: ${c.examples.join(", ")}`)
       .join("\n\n");
 
-    const prompt = `You are Gurukul AI, a world-class empathetic tutor delivering an engaging live spoken lesson.
+    const prompt = `You are Gurukul AI, a world-class empathetic tutor delivering an engaging live chalkboard lesson.
 Lesson Topic: ${lessonTitle}
-Current Concept to Teach: ${concept.name}
+Current Concept: ${concept.name}
 Target Depth: ${depth}
-Visual Aid Chosen: ${concept.visual_type}
-Language: ${language === "hi" ? "Hindi (Natural conversational Hindi in Devanagari script)" : "English"}
+Visual Type: ${concept.visual_type}
+Interaction Mode: ${concept.interaction_type || "question"}
+Language: ${language === "hi" ? "Hindi (Conversational Devanagari)" : "English"}
 
-GROUNDING CONTEXT (You MUST base your factual explanation strictly on this text):
+GROUNDING CONTEXT:
 """
 ${contextText || concept.name}
 """
 
 TEACHING INSTRUCTIONS:
-1. "spoken_text": A concise, clear, conversational 3-5 sentence explanation designed for speech.
-2. "visual_content": Provide the exact code/syntax matching visual_type:
-   - If visual_type is "equation": valid LaTeX math string (e.g., E = mc^2)
-   - If visual_type is "diagram": valid Mermaid.js graph definition (e.g., graph TD\n A[Input] --> B[Processing] --> C[Output])
-   - If visual_type is "code": clean, commented runnable code snippet
-   - If visual_type is "timeline": JSON array string or formatted steps (e.g., Step 1: Ingestion -> Step 2: Chunking -> Step 3: Retrieval)
-   - If visual_type is "none": empty string ""
-3. "citations": Array of short cited titles/sections used from the grounding chunks.
-4. "checkpoint_question": A crystal clear checkpoint question to ask the student right after this explanation.
+1. "spoken_text": A concise, clear 3-5 sentence explanation designed for spoken delivery.
+2. "visual_content": Code/syntax for visual_type:
+   - "equation": LaTeX math (e.g., E = mc^2)
+   - "diagram": Mermaid.js graph (e.g., graph TD\n A[Input] --> B[Processing] --> C[Output])
+   - "code": Clean runnable snippet
+   - "timeline": Step 1 -> Step 2 -> Step 3
+   - "none": ""
+3. "citations": Short array of cited chunk titles.
+4. "checkpoint_question": ${
+      concept.interaction_type === "feynman"
+        ? language === "hi"
+          ? `"अब अपनी समझ से मुझे समझाइए: ${concept.name} कैसे काम करता है?"`
+          : `"Now explain it back to me in your own words: how does ${concept.name} actually work?"`
+        : `"${concept.checkpoint_question}"`
+    }
 
 Output JSON ONLY:
 {
@@ -244,7 +256,8 @@ Output JSON ONLY:
   "visual_content": "string",
   "citations": ["string"],
   "concept_name": "${concept.name}",
-  "checkpoint_question": "${concept.checkpoint_question || "string"}"
+  "checkpoint_question": "string",
+  "interaction_type": "${concept.interaction_type || "question"}"
 }`;
 
     const result = await model.generateContent(prompt);
@@ -257,7 +270,7 @@ Output JSON ONLY:
 }
 
 // ============================================================================
-// 5. TEACHING LOOP: ANSWER EVALUATION
+// 5. TEACHING LOOP: ANSWER EVALUATION (Supports Feynman Mode & Gaps)
 // ============================================================================
 export async function evaluateStudentAnswer({
   conceptName,
@@ -265,35 +278,60 @@ export async function evaluateStudentAnswer({
   studentAnswer,
   groundingContext,
   language,
+  interactionType = "question",
 }: {
   conceptName: string;
   question: string;
   studentAnswer: string;
   groundingContext: string;
   language: Language;
+  interactionType?: InteractionType;
 }): Promise<EvaluationResult> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    return getFallbackEvaluation(studentAnswer);
+    return getFallbackEvaluation(studentAnswer, interactionType);
   }
 
   try {
     const ai = getGeminiClient();
     const model = await getWorkingModel(ai, true);
 
-    const prompt = `You are the diagnostic assessment engine for Gurukul AI.
-Evaluate the student's response to verify understanding of the concept: "${conceptName}".
+    const isFeynman = interactionType === "feynman";
 
-Question Asked: """${question}"""
-Student's Answer: """${studentAnswer}"""
-Ground Truth / Reference Material: """${groundingContext}"""
+    const prompt = isFeynman
+      ? `You are the Feynman diagnostic engine for Gurukul AI.
+The student was asked to explain the concept "${conceptName}" back in their own words.
+
+Student's Explanation: """${studentAnswer}"""
+Ground Truth / Reference: """${groundingContext}"""
 Language: ${language === "hi" ? "Hindi" : "English"}
 
-DIAGNOSTIC TASK:
-1. Determine if the student's answer is conceptually correct ("correct": true / false).
-2. If wrong or partially incorrect, identify the EXACT "misconception".
-3. Assign a "confidence" score between 0.0 and 1.0.
-4. Write constructive, empathetic "feedback" in ${language === "hi" ? "Hindi" : "English"}.
+FEYNMAN DIAGNOSTIC TASK:
+1. Did the student demonstrate genuine conceptual understanding? ("understood": boolean)
+2. Identify specific conceptual gaps or missing causal links in their mental model: ("gaps": ["gap 1", "gap 2"]). If none, empty array [].
+3. Identify what the student articulated well: ("praise_point": "string")
+4. Provide encouraging feedback in ${language === "hi" ? "Hindi" : "English"}: ("feedback": "string")
+5. "correct": true if understood is true and gaps are minimal; false if there are critical missing mechanisms.
+6. "misconception": summarize the primary gap if incorrect, else null.
+
+Return ONLY JSON:
+{
+  "understood": boolean,
+  "gaps": string[],
+  "praise_point": "string",
+  "correct": boolean,
+  "misconception": string or null,
+  "confidence": number,
+  "feedback": "string",
+  "interaction_type": "feynman"
+}`
+      : `You are the diagnostic assessment engine for Gurukul AI.
+Evaluate the student's response to: "${conceptName}".
+
+Question: """${question}"""
+Student's Answer: """${studentAnswer}"""
+Ground Truth: """${groundingContext}"""
+Language: ${language === "hi" ? "Hindi" : "English"}
 
 Return ONLY JSON:
 {
@@ -301,7 +339,8 @@ Return ONLY JSON:
   "misconception": string or null,
   "confidence": number,
   "feedback": "string",
-  "suggested_depth": "beginner" | "intermediate" | "advanced"
+  "suggested_depth": "beginner" | "intermediate" | "advanced",
+  "interaction_type": "question"
 }`;
 
     const result = await model.generateContent(prompt);
@@ -309,7 +348,7 @@ Return ONLY JSON:
     return parsed;
   } catch (error) {
     console.error("Gemini evaluateStudentAnswer error, using fallback:", error);
-    return getFallbackEvaluation(studentAnswer);
+    return getFallbackEvaluation(studentAnswer, interactionType);
   }
 }
 
@@ -340,20 +379,20 @@ export async function generateReExplanation({
     const ai = getGeminiClient();
     const model = await getWorkingModel(ai, true);
 
-    const prompt = `You are Gurukul AI delivering a targeted adaptive re-explanation.
-The student gave an incorrect answer due to a specific misconception.
+    const prompt = `You are Gurukul AI delivering a targeted chalkboard re-explanation.
+The student struggled with a specific conceptual gap / misconception.
 
 Concept: "${concept.name}"
 Previous Explanation Given: """${previousExplanation}"""
-Student's Answer: """${studentAnswer}"""
-Identified Misconception: """${misconception}"""
+Student's Response: """${studentAnswer}"""
+Identified Gap / Misconception: """${misconception}"""
 Language: ${language === "hi" ? "Hindi (Conversational Devanagari)" : "English"}
 
 CRITICAL PEDAGOGICAL INSTRUCTIONS:
 1. DO NOT simply repeat the previous explanation.
-2. Introduce a COMPLETELY NOVEL analogy, intuitive mental model, or real-life comparison directly dismantling the identified misconception: "${misconception}".
+2. Introduce a COMPLETELY NOVEL analogy or intuitive physical comparison directly resolving: "${misconception}".
 3. Keep spoken_text under 4-5 encouraging, crystal-clear spoken sentences.
-4. Formulate a FRESH, alternative checkpoint question to verify if the misconception has been resolved.
+4. Formulate a FRESH, alternative checkpoint question.
 
 Return ONLY JSON:
 {
@@ -430,7 +469,7 @@ Return ONLY a JSON array:
 }
 
 // ============================================================================
-// FALLBACKS (Guarantees zero crashes during live hackathon demos)
+// FALLBACKS
 // ============================================================================
 
 function generateDeterministicEmbedding(text: string, dim = 768): number[] {
@@ -483,6 +522,13 @@ function getFallbackLessonPlan(
   const isHi = language === "hi";
   const is7Day = timeMinutes >= 1000 || timeMinutes === 7;
 
+  const callback =
+    priorWeakConcepts.length > 0
+      ? isHi
+        ? `पिछली बार ${priorWeakConcepts[0]} में कठिनाई हुई थी — आइए आगे बढ़ने से पहले 2 मिनट का पुनरावलोकन करें।`
+        : `Last time, ${priorWeakConcepts[0]} tripped you up — let's start with a quick 2-minute refresher before we move on.`
+      : undefined;
+
   if (is7Day) {
     return {
       concepts: Array.from({ length: 7 }, (_, i) => ({
@@ -491,11 +537,20 @@ function getFallbackLessonPlan(
         time_minutes: 30,
         visual_type: i % 2 === 0 ? "diagram" : "timeline",
         visual_content: `graph LR\n  D${i + 1}[Day ${i + 1}] --> Goal[Mastery]`,
-        checkpoint_question: isHi ? `दिन ${i + 1} का मुख्य सिद्धांत क्या है?` : `What is the key takeaway of Day ${i + 1}?`,
+        checkpoint_question:
+          i % 2 === 1
+            ? isHi
+              ? `अपनी भाषा में समझाएं कि दिन ${i + 1} का मुख्य तंत्र क्या है?`
+              : `Explain in your own words: what is the core mechanism of Day ${i + 1}?`
+            : isHi
+            ? `दिन ${i + 1} का मुख्य सिद्धांत क्या है?`
+            : `What is the key takeaway of Day ${i + 1}?`,
+        interaction_type: i % 2 === 1 ? "feynman" : "question",
         day: i + 1,
       })),
       total_time_minutes: 210,
       language,
+      prior_memory_callback: callback,
     };
   }
 
@@ -504,16 +559,20 @@ function getFallbackLessonPlan(
 
   if (priorWeakConcepts.length > 0) {
     concepts.push({
-      name: isHi ? `पुनरावलोकन: ${priorWeakConcepts[0]}` : `Review: ${priorWeakConcepts[0]}`,
+      name: isHi ? `पुनरावलोकन: ${priorWeakConcepts[0]}` : `Refresher: ${priorWeakConcepts[0]}`,
       depth: "beginner",
       time_minutes: Math.max(2, Math.floor(timeMinutes / (count + 1))),
       visual_type: "diagram",
       visual_content: "graph TD\n  Weak[Prior Gap] --> Fixed[Mastered Concept]",
-      checkpoint_question: isHi ? "क्या इस पुनरावलोकन से आपका संदेह दूर हुआ?" : "How does this bridge the previous gap?",
+      checkpoint_question: isHi
+        ? "अपनी भाषा में बताएं कि यह नया दृष्टिकोण पिछले संदेह को कैसे दूर करता है?"
+        : "Explain in your own words how this addresses your previous misconception.",
+      interaction_type: "feynman",
     });
   }
 
   for (let i = 1; i <= count; i++) {
+    const isFeynman = i === 2 || (count === 2 && i === 2);
     concepts.push({
       name: isHi ? `${topic} - अवधारणा ${i}` : `${topic}: Key Principle ${i}`,
       depth: i === 1 ? depth : "intermediate",
@@ -521,13 +580,18 @@ function getFallbackLessonPlan(
       visual_type: i === 1 ? "diagram" : i === 2 ? "equation" : "code",
       visual_content:
         i === 1
-          ? "graph TD\n  A[Core Principle] --> B[Implementation] --> C[Results]"
+          ? "graph TD\n  A[Core Principle] --> B[Mechanism] --> C[Outcome]"
           : i === 2
           ? "E = mc^2"
-          : "def execute_pipeline(input_data):\n    return process(input_data)",
-      checkpoint_question: isHi
-        ? `इस अवधारणा का मुख्य उद्देश्य क्या है और यह कैसे काम करती है?`
+          : "def run_pipeline(x):\n    return transform(x)",
+      checkpoint_question: isFeynman
+        ? isHi
+          ? `अब अपनी समझ से मुझे समझाइए: यह अवधारणा कैसे काम करती है?`
+          : `Explain it back to me in your own words: how does this principle work?`
+        : isHi
+        ? `इस अवधारणा का मुख्य उद्देश्य क्या है?`
         : `What is the primary function of this principle in practice?`,
+      interaction_type: isFeynman ? "feynman" : "question",
     });
   }
 
@@ -535,6 +599,7 @@ function getFallbackLessonPlan(
     concepts,
     total_time_minutes: timeMinutes,
     language,
+    prior_memory_callback: callback,
   };
 }
 
@@ -548,13 +613,48 @@ function getFallbackExplanation(concept: ConceptPlan, chunks: ExtractedConceptCh
     visual_content: concept.visual_content || "graph TD\n  Start[Concept] --> Step[Mechanism] --> Finish[Output]",
     citations: chunks.length > 0 ? [chunks[0].concept_name] : [concept.name],
     concept_name: concept.name,
-    checkpoint_question: concept.checkpoint_question || (isHi ? "इस सिद्धांत का मुख्य लाभ क्या है?" : "What is the primary advantage of this principle?"),
+    checkpoint_question:
+      concept.checkpoint_question ||
+      (concept.interaction_type === "feynman"
+        ? isHi
+          ? "अब अपनी समझ से मुझे समझाइए: यह कैसे काम करता है?"
+          : "Now explain it back to me in your own words."
+        : isHi
+        ? "इस सिद्धांत का मुख्य लाभ क्या है?"
+        : "What is the primary advantage of this principle?"),
+    interaction_type: concept.interaction_type || "question",
   };
 }
 
-function getFallbackEvaluation(answer: string): EvaluationResult {
+function getFallbackEvaluation(answer: string, interactionType: InteractionType = "question"): EvaluationResult {
   const lower = answer.toLowerCase();
-  const isWrong = lower.includes("not sure") || lower.includes("don't know") || lower.includes("गलत") || lower.length < 5;
+  const isWrong = lower.includes("not sure") || lower.includes("don't know") || lower.includes("गलत") || lower.length < 8;
+
+  if (interactionType === "feynman") {
+    if (isWrong) {
+      return {
+        understood: false,
+        gaps: ["Missing mechanical transformation step", "Confused causal triggers"],
+        praise_point: "You recognized the initial premise.",
+        correct: false,
+        misconception: "Surface-level summary missing the transformation mechanism",
+        confidence: 0.88,
+        feedback: "Good start, but you missed explaining how the state transitions from input to output.",
+        interaction_type: "feynman",
+      };
+    }
+    return {
+      understood: true,
+      gaps: [],
+      praise_point: "Clear intuitive breakdown of the core mechanism.",
+      correct: true,
+      misconception: null,
+      confidence: 0.95,
+      feedback: "Brilliant explanation in your own words! You captured the full intuition.",
+      interaction_type: "feynman",
+    };
+  }
+
   if (isWrong) {
     return {
       correct: false,
@@ -562,6 +662,7 @@ function getFallbackEvaluation(answer: string): EvaluationResult {
       confidence: 0.88,
       feedback: "Good try! However, there is a subtle misconception regarding how the components interact.",
       suggested_depth: "beginner",
+      interaction_type: "question",
     };
   }
   return {
@@ -570,6 +671,7 @@ function getFallbackEvaluation(answer: string): EvaluationResult {
     confidence: 0.94,
     feedback: "Excellent reasoning! You captured the core principle accurately.",
     suggested_depth: "intermediate",
+    interaction_type: "question",
   };
 }
 
@@ -588,6 +690,7 @@ function getFallbackReExplanation(concept: ConceptPlan, misconception: string, l
       : "Based on this reservoir analogy, how does the transformation step prevent state leakage?",
     is_reexplanation: true,
     misconception_addressed: misconception,
+    interaction_type: "question",
   };
 }
 

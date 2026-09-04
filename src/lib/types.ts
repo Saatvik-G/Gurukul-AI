@@ -9,16 +9,18 @@ export type SessionState =
 export type VisualType = "equation" | "diagram" | "code" | "timeline" | "none";
 export type LearnerDepth = "beginner" | "intermediate" | "advanced";
 export type Language = "en" | "hi";
+export type InteractionType = "question" | "feynman"; // Feynman mode: "explain it back to me in your own words"
 
 export interface ConceptPlan {
   name: string;
   depth: LearnerDepth;
   time_minutes: number;
   visual_type: VisualType;
-  visual_content?: string; // LaTeX code, Mermaid code, code snippet, or timeline items
+  visual_content?: string;
   checkpoint_question: string;
+  interaction_type?: InteractionType; // "question" or "feynman"
   expected_key_points?: string[];
-  day?: number; // for 7-day plans
+  day?: number;
 }
 
 export interface LessonPlan {
@@ -27,6 +29,7 @@ export interface LessonPlan {
   concepts: ConceptPlan[];
   total_time_minutes: number;
   language: Language;
+  prior_memory_callback?: string; // e.g. "Last time, Ohm's Law tripped you up..."
   created_at?: string;
 }
 
@@ -54,8 +57,9 @@ export interface Session {
     topic?: string;
     sourceType?: "upload" | "topic";
     sourceFileName?: string;
-    attemptCount?: number;
     priorWeakConcepts?: string[];
+    priorMemoryCallback?: string;
+    conceptMasteries?: Record<number, "turmeric" | "sindoor" | "moss">;
     [key: string]: any;
   };
   created_at?: string;
@@ -68,6 +72,11 @@ export interface EvaluationResult {
   confidence: number;
   feedback: string;
   suggested_depth?: LearnerDepth;
+  // Feynman mode specific diagnostics
+  understood?: boolean;
+  gaps?: string[];
+  praise_point?: string;
+  interaction_type?: InteractionType;
 }
 
 export interface ExplanationResponse {
@@ -77,6 +86,7 @@ export interface ExplanationResponse {
   citations: string[];
   concept_name: string;
   checkpoint_question: string;
+  interaction_type?: InteractionType;
   is_reexplanation?: boolean;
   misconception_addressed?: string | null;
 }

@@ -1,8 +1,8 @@
 "use client";
 
 import React from "react";
-import { Award, BookOpen, CheckCircle2, History, Sparkles, TrendingUp, X, XCircle } from "lucide-react";
 import { LearnerProfile } from "@/lib/types";
+import { ChalkWavyLine } from "./ChalkWavyLine";
 
 interface LearnerProfileViewProps {
   isOpen: boolean;
@@ -22,137 +22,111 @@ export const LearnerProfileView: React.FC<LearnerProfileViewProps> = ({
   const isHi = language === "hi";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs font-body">
+      <div className="w-full max-w-xl bg-[#EFE9DA] text-[#2A2A26] border-2 border-[#8E9C88] rounded-sm p-6 space-y-4 max-h-[85vh] overflow-y-auto">
         {/* Header */}
-        <div className="p-6 bg-gradient-to-r from-indigo-950 via-slate-900 to-slate-950 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-3 rounded-2xl bg-indigo-600/30 text-indigo-400 border border-indigo-500/30">
-              <TrendingUp className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white">
-                {isHi ? "विद्यार्थी संज्ञानात्मक प्रोफ़ाइल" : "Learner Cognitive Profile"}
-              </h2>
-              <p className="text-xs text-slate-400">
-                {isHi
-                  ? "दीर्घकालिक ज्ञान स्मृति एवं अनुकूलन इतिहास"
-                  : "Cross-session mastery & memory tracking for personalized adaptation"}
-              </p>
-            </div>
+        <div className="flex items-start justify-between border-b border-[#8E9C88]/40 pb-2">
+          <div>
+            <h2 className="text-xl font-serif-heading font-bold text-[#2A2A26]">
+              {isHi ? "विद्यार्थी संज्ञानात्मक बहीखाता" : "Learner Cognitive Ledger"}
+            </h2>
+            <ChalkWavyLine className="w-24 mt-1" />
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition"
+            className="text-xs text-[#2A2A26] hover:text-[#E3A23B] underline font-body"
           >
-            <X className="w-5 h-5" />
+            Close
           </button>
         </div>
 
-        {/* Content Body */}
-        <div className="p-6 overflow-y-auto space-y-6">
-          {/* Summary Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800">
-              <span className="text-[11px] uppercase font-bold text-slate-400 block mb-1">
-                {isHi ? "सत्र संख्या" : "Sessions Completed"}
-              </span>
-              <span className="text-2xl font-black text-indigo-400">
-                {profile?.session_history?.length || 0}
-              </span>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800">
-              <span className="text-[11px] uppercase font-bold text-slate-400 block mb-1">
-                {isHi ? "मजबूत अवधारणाएं" : "Mastered Concepts"}
-              </span>
-              <span className="text-2xl font-black text-emerald-400">
-                {profile?.strong_concepts.length || 0}
-              </span>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 col-span-2 sm:col-span-1">
-              <span className="text-[11px] uppercase font-bold text-slate-400 block mb-1">
-                {isHi ? "पुनरावलोकन लक्ष्य" : "Target Weak Areas"}
-              </span>
-              <span className="text-2xl font-black text-amber-400">
-                {profile?.weak_concepts.length || 0}
-              </span>
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="p-2.5 bg-[#E6DEC9] border border-[#8E9C88]/40 rounded-xs text-center">
+            <div className="text-[10px] text-[#8E9C88]">Sessions</div>
+            <div className="text-xl font-serif-heading font-bold text-[#2A2A26]">
+              {profile?.session_history?.length || 0}
             </div>
           </div>
-
-          {/* Mastered Concepts */}
-          <div>
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-400 mb-2.5">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>{isHi ? "सत्यापित महारत (Mastered Concepts)" : "Verified Masteries"}</span>
+          <div className="p-2.5 bg-[#E6DEC9] border border-[#8E9C88]/40 rounded-xs text-center">
+            <div className="text-[10px] text-[#8E9C88]">Mastered</div>
+            <div className="text-xl font-serif-heading font-bold text-[#E3A23B]">
+              {profile?.strong_concepts.length || 0}
             </div>
-            {profile?.strong_concepts && profile.strong_concepts.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {profile.strong_concepts.map((c, i) => (
-                  <span
-                    key={i}
-                    className="px-3 py-1.5 rounded-xl bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 text-xs font-medium"
-                  >
-                    ✓ {c}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500 italic">No masteries recorded yet.</p>
-            )}
           </div>
-
-          {/* Weak Focus Areas */}
-          <div>
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-400 mb-2.5">
-              <XCircle className="w-4 h-4" />
-              <span>{isHi ? "सक्रिय सुदृढ़ीकरण बिंदु (Weak Areas)" : "Active Reinforcement Targets"}</span>
+          <div className="p-2.5 bg-[#E6DEC9] border border-[#8E9C88]/40 rounded-xs text-center">
+            <div className="text-[10px] text-[#8E9C88]">Focus targets</div>
+            <div className="text-xl font-serif-heading font-bold text-[#B5482F]">
+              {profile?.weak_concepts.length || 0}
             </div>
-            {profile?.weak_concepts && profile.weak_concepts.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {profile.weak_concepts.map((c, i) => (
-                  <span
-                    key={i}
-                    className="px-3 py-1.5 rounded-xl bg-amber-950/60 text-amber-300 border border-amber-800/40 text-xs font-medium"
-                  >
-                    ⚠ {c}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-emerald-400">No active conceptual deficits! 🎉</p>
-            )}
           </div>
+        </div>
 
-          {/* Session History */}
-          <div>
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-400 mb-2.5">
-              <History className="w-4 h-4" />
-              <span>{isHi ? "सत्र इतिहास (Past Sessions)" : "Session History"}</span>
+        {/* Mastered list */}
+        <div>
+          <div className="text-xs font-serif-heading font-bold text-[#2A2A26] mb-1">
+            Mastered concepts (सत्यापित महारत)
+          </div>
+          {profile?.strong_concepts && profile.strong_concepts.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {profile.strong_concepts.map((c, i) => (
+                <span
+                  key={i}
+                  className="px-2 py-0.5 bg-[#E6DEC9] border border-[#8E9C88]/50 text-xs text-[#2A2A26] rounded-xs"
+                >
+                  ✓ {c}
+                </span>
+              ))}
             </div>
-            {profile?.session_history && profile.session_history.length > 0 ? (
-              <div className="space-y-2">
-                {profile.session_history.map((sess, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between"
-                  >
-                    <div>
-                      <div className="font-semibold text-sm text-slate-200">{sess.topic}</div>
-                      <div className="text-[11px] text-slate-400">{sess.date}</div>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-xs font-bold text-amber-400">{sess.score}%</span>
-                      <span className="text-[10px] text-slate-500 block">Mastery</span>
-                    </div>
+          ) : (
+            <p className="text-xs text-[#8E9C88] italic">No masteries recorded yet.</p>
+          )}
+        </div>
+
+        {/* Focus areas */}
+        <div>
+          <div className="text-xs font-serif-heading font-bold text-[#B5482F] mb-1">
+            Reinforcement targets (सक्रिय सुधार बिंदु)
+          </div>
+          {profile?.weak_concepts && profile.weak_concepts.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {profile.weak_concepts.map((c, i) => (
+                <span
+                  key={i}
+                  className="px-2 py-0.5 bg-[#F8F3B8] border border-[#E3A23B] text-xs text-[#2A2A26] rounded-xs font-medium"
+                >
+                  • {c}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-[#8E9C88]">No active weak concepts.</p>
+          )}
+        </div>
+
+        {/* Session history */}
+        <div>
+          <div className="text-xs font-serif-heading font-bold text-[#2A2A26] mb-1">
+            Past session ledger
+          </div>
+          {profile?.session_history && profile.session_history.length > 0 ? (
+            <div className="space-y-1.5 max-h-36 overflow-y-auto">
+              {profile.session_history.map((sess, idx) => (
+                <div
+                  key={idx}
+                  className="p-2 bg-[#E6DEC9] border border-[#8E9C88]/30 rounded-xs flex items-center justify-between text-xs"
+                >
+                  <div>
+                    <div className="font-medium text-[#2A2A26]">{sess.topic}</div>
+                    <div className="text-[10px] text-[#8E9C88]">{sess.date}</div>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500 italic">No past sessions recorded.</p>
-            )}
-          </div>
+                  <div className="font-bold text-[#E3A23B]">{sess.score}%</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-[#8E9C88] italic">No past sessions.</p>
+          )}
         </div>
       </div>
     </div>
