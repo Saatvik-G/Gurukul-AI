@@ -18,27 +18,39 @@ export const getGeminiClient = () => {
   return new GoogleGenerativeAI(key || "dummy_key");
 };
 
-// Candidate model cascade with active Gemini models
-const MODEL_CANDIDATES = [
+// Active Gemini Flash models for high-availability cascading
+const CASCADE_MODELS = [
   "gemini-3.6-flash",
   "gemini-3.5-flash",
   "gemini-flash-latest",
 ];
 
-async function getWorkingModel(ai: GoogleGenerativeAI, jsonMode = true) {
-  for (const modelName of MODEL_CANDIDATES) {
+async function generateContentWithCascade(
+  ai: GoogleGenerativeAI,
+  prompt: string,
+  jsonMode = true
+): Promise<string> {
+  let lastError: any = null;
+
+  for (const modelName of CASCADE_MODELS) {
     try {
-      return ai.getGenerativeModel({
+      const model = ai.getGenerativeModel({
         model: modelName,
         generationConfig: jsonMode
           ? { responseMimeType: "application/json", temperature: 0.2 }
           : { temperature: 0.3 },
       });
-    } catch {
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      if (text) return text;
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[Cascade Notice] ${modelName} returned: ${err.message}. Trying next candidate in cascade...`);
       continue;
     }
   }
-  return ai.getGenerativeModel({ model: "gemini-3.6-flash" });
+
+  throw lastError || new Error("All cascade models failed to generate content");
 }
 
 // ============================================================================
@@ -56,7 +68,6 @@ export async function extractStructuredConcepts(
 
   try {
     const ai = getGeminiClient();
-    const model = await getWorkingModel(ai, true);
 
     const prompt = `You are an expert pedagogical content extractor for Gurukul AI.
 Analyze the following ${sourceType === "upload" ? "document text" : "topic description"}:
@@ -78,8 +89,7 @@ Respond ONLY with a valid JSON array matching this schema:
   }
 ]`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const text = await generateContentWithCascade(ai, prompt, true);
     const parsed = JSON.parse(text);
     if (Array.isArray(parsed) && parsed.length > 0) {
       return parsed;
@@ -137,7 +147,6 @@ export async function generateLessonPlan({
 
   try {
     const ai = getGeminiClient();
-    const model = await getWorkingModel(ai, true);
 
     const is7Day = timeMinutes >= 1000 || timeMinutes === 7;
     const effectiveTime = is7Day ? 7 * 30 : timeMinutes;
@@ -183,8 +192,8 @@ Return ONLY a JSON object:
   "prior_memory_callback": "string or null"
 }`;
 
-    const result = await model.generateContent(prompt);
-    const parsed = JSON.parse(result.response.text()) as LessonPlan;
+    const text = await generateContentWithCascade(ai, prompt, true);
+    const parsed = JSON.parse(text) as LessonPlan;
     if (parsed && Array.isArray(parsed.concepts) && parsed.concepts.length > 0) {
       return parsed;
     }
@@ -218,7 +227,6 @@ export async function generateGroundedExplanation({
 
   try {
     const ai = getGeminiClient();
-    const model = await getWorkingModel(ai, true);
 
     const contextText = retrievedChunks
       .map((c, i) => `[Chunk ${i + 1} - ${c.concept_name}]:\nDefinition: ${c.definition}\n${c.content_chunk}\nExamples: ${c.examples.join(", ")}`)
@@ -265,8 +273,8 @@ Output JSON ONLY:
   "interaction_type": "${concept.interaction_type || "question"}"
 }`;
 
-    const result = await model.generateContent(prompt);
-    const parsed = JSON.parse(result.response.text()) as ExplanationResponse;
+    const text = await generateContentWithCascade(ai, prompt, true);
+    const parsed = JSON.parse(text) as ExplanationResponse;
     return parsed;
   } catch (error) {
     console.error("Gemini generateGroundedExplanation error, using fallback:", error);
@@ -368,8 +376,6 @@ export async function evaluateStudentAnswer({
 
   try {
     const ai = getGeminiClient();
-    const model = await getWorkingModel(ai, true);
-
     const isFeynman = interactionType === "feynman";
 
     const prompt = isFeynman
@@ -423,8 +429,8 @@ Return ONLY JSON:
   "interaction_type": "question"
 }`;
 
-    const result = await model.generateContent(prompt);
-    const parsed = JSON.parse(result.response.text()) as EvaluationResult;
+    const text = await generateContentWithCascade(ai, prompt, true);
+    const parsed = JSON.parse(text) as EvaluationResult;
     return parsed;
   } catch (error) {
     console.error("Gemini evaluateStudentAnswer error, using fallback:", error);
@@ -457,7 +463,6 @@ export async function generateReExplanation({
 
   try {
     const ai = getGeminiClient();
-    const model = await getWorkingModel(ai, true);
 
     const prompt = `You are Gurukul AI delivering a targeted chalkboard re-explanation.
 The student struggled with a specific conceptual gap / misconception.
@@ -486,8 +491,8 @@ Return ONLY JSON:
   "misconception_addressed": "${misconception.replace(/"/g, "'")}"
 }`;
 
-    const result = await model.generateContent(prompt);
-    const parsed = JSON.parse(result.response.text()) as ExplanationResponse;
+    const text = await generateContentWithCascade(ai, prompt, true);
+    const parsed = JSON.parse(text) as ExplanationResponse;
     parsed.is_reexplanation = true;
     parsed.misconception_addressed = misconception;
     return parsed;
@@ -516,7 +521,6 @@ export async function generateAssessmentQuiz({
 
   try {
     const ai = getGeminiClient();
-    const model = await getWorkingModel(ai, true);
 
     const prompt = `You are the master assessment creator for Gurukul AI.
 Create a 3 to 5 question multiple-choice quiz testing the student's mastery of the lesson: "${lessonTitle}".
@@ -536,8 +540,8 @@ Return ONLY a JSON array:
   }
 ]`;
 
-    const result = await model.generateContent(prompt);
-    const parsed = JSON.parse(result.response.text()) as QuizQuestion[];
+    const text = await generateContentWithCascade(ai, prompt, true);
+    const parsed = JSON.parse(text) as QuizQuestion[];
     if (Array.isArray(parsed) && parsed.length > 0) {
       return parsed;
     }
