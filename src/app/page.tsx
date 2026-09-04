@@ -69,67 +69,76 @@ export default function Home() {
     setIsSetupOpen(false);
     setLoadingMessage(
       config.language === "hi"
-        ? "दस्तावेज़ का विश्लेषण एवं अवधारणा निष्कर्षण जारी है..."
-        : "Extracting concepts & chunking knowledge into pgvector..."
+        ? "गुरुकुल पाठ योजना एवं ज्ञान संरचना तैयार की जा रही है..."
+        : "Extracting knowledge & preparing adaptive lesson plan..."
     );
 
     try {
-      let sessionId = "";
+      const sessionId = crypto.randomUUID();
+      const topicText = config.topic || config.file?.name || quickTopic || "Quantum Computing";
+
+      let ingestPromise: Promise<Response>;
       if (config.file) {
         const formData = new FormData();
+        formData.append("sessionId", sessionId);
         formData.append("file", config.file);
         if (config.topic) formData.append("topic", config.topic);
         formData.append("language", config.language);
         formData.append("targetDepth", config.depth);
         formData.append("timeMinutes", config.timeMinutes.toString());
 
-        const res = await fetch("/api/ingest", {
+        ingestPromise = fetch("/api/ingest", {
           method: "POST",
           body: formData,
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Failed to ingest document");
-        sessionId = data.sessionId;
       } else {
-        const res = await fetch("/api/ingest", {
+        ingestPromise = fetch("/api/ingest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            topic: config.topic || quickTopic || "Quantum Computing",
+            sessionId,
+            topic: topicText,
             language: config.language,
             targetDepth: config.depth,
             timeMinutes: config.timeMinutes,
           }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Failed to ingest topic");
-        sessionId = data.sessionId;
       }
 
-      setLoadingMessage(
-        config.language === "hi"
-          ? "अनुकूलित पाठ योजना एवं फेनमैन चेकपॉइंट तैयार किए जा रहे हैं..."
-          : "Structuring adaptive lesson plan & Feynman checkpoints..."
-      );
-
-      const plannerRes = await fetch("/api/planner", {
+      const plannerPromise = fetch("/api/planner", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
-          topicOrDocument: config.topic || config.file?.name || quickTopic,
+          topicOrDocument: topicText,
           timeMinutes: config.timeMinutes,
           depth: config.depth,
           language: config.language,
         }),
       });
+
+      // Execute Ingestion and Lesson Planning in parallel
+      const [ingestRes, plannerRes] = await Promise.all([ingestPromise, plannerPromise]);
+
+      const ingestData = await ingestRes.json();
+      if (!ingestRes.ok) throw new Error(ingestData.error || "Failed to ingest material");
+
       const plannerData = await plannerRes.json();
       if (!plannerRes.ok) throw new Error(plannerData.error || "Failed to generate lesson plan");
 
-      const sessionRes = await fetch(`/api/session?sessionId=${sessionId}`);
-      const sessionData = await sessionRes.json();
+      const sessionObj: Session = ingestData.session || {
+        id: sessionId,
+        user_id: "default_user",
+        title: topicText,
+        state: "explaining",
+        current_concept_index: 0,
+        language: config.language,
+        target_depth: config.depth,
+        available_time_minutes: config.timeMinutes,
+        metadata: { conceptMasteries: {} },
+      };
 
-      setActiveSession(sessionData.session);
+      setActiveSession(sessionObj);
       setActiveLessonPlan(plannerData.plan);
       setLanguage(config.language);
       setView("lesson");

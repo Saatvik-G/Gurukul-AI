@@ -14,9 +14,11 @@ export async function POST(req: NextRequest) {
     let targetDepth: LearnerDepth = "beginner";
     let timeMinutes = 20;
 
+    let providedSessionId = "";
     if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData();
       const file = formData.get("file") as File | null;
+      providedSessionId = (formData.get("sessionId") as string) || "";
       topicTitle = (formData.get("topic") as string) || "";
       language = ((formData.get("language") as string) as Language) || "en";
       targetDepth = ((formData.get("targetDepth") as string) as LearnerDepth) || "beginner";
@@ -35,6 +37,7 @@ export async function POST(req: NextRequest) {
       }
     } else {
       const body = await req.json();
+      providedSessionId = body.sessionId || "";
       topicTitle = body.topic || "Personalized Lesson";
       rawText = body.content || body.topic || "";
       sourceType = body.sourceType || "topic";
@@ -55,7 +58,7 @@ export async function POST(req: NextRequest) {
     // 1. Structured Concept Extraction via Gemini Flash
     const extracted = await extractStructuredConcepts(effectiveText, sourceType, language);
 
-    // 2. Generate Embeddings for pgvector
+    // 2. Generate Embeddings in parallel for pgvector
     const chunksWithEmbeddings: ExtractedConceptChunk[] = await Promise.all(
       extracted.map(async (item) => {
         const textToEmbed = `${item.concept_name}: ${item.definition} ${item.content_chunk}`;
@@ -68,7 +71,7 @@ export async function POST(req: NextRequest) {
     );
 
     // 3. Initialize Session
-    const sessionId = crypto.randomUUID();
+    const sessionId = providedSessionId || crypto.randomUUID();
     const newSession: Session = {
       id: sessionId,
       user_id: "default_user",
