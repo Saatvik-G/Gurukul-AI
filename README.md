@@ -1,6 +1,6 @@
 # Gurukul AI — Adaptive AI Teacher
 
-> **Live Prototype**: [https://gurukul-ai-alpha.vercel.app](https://gurukul-ai-alpha.vercel.app) *(Deploy to Vercel and paste production URL)*  
+> **Live Prototype**: [https://gurukulai-seven.vercel.app/](https://gurukulai-seven.vercel.app/)  
 > **Repository**: [https://github.com/Saatvik-G/Gurukul-AI.git](https://github.com/Saatvik-G/Gurukul-AI.git)
 
 ---
