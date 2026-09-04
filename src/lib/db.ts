@@ -7,10 +7,17 @@ import {
   Session,
 } from "./types";
 
-const databaseUrl = process.env.DATABASE_URL || "";
+const databaseUrl =
+  process.env.DATABASE_URL ||
+  process.env.POSTGRES_URL ||
+  process.env.POSTGRES_PRISMA_URL ||
+  process.env.POSTGRES_URL_NON_POOLING ||
+  "";
 
 export const isNeonConfigured = Boolean(
-  databaseUrl && !databaseUrl.includes("your-neon-database-url")
+  databaseUrl &&
+    !databaseUrl.includes("your-neon-database-url") &&
+    !databaseUrl.includes("your-project")
 );
 
 const getSql = () => {
