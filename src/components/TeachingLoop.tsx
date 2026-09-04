@@ -135,24 +135,28 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
     utterance.rate = 1.0;
 
     let simInterval: any;
+    let fallbackTimeout: any;
+
     utterance.onstart = () => {
       setIsSpeaking(true);
       simInterval = setInterval(() => {
-        setAmplitude(0.2 + Math.random() * 0.5);
+        setAmplitude(0.2 + Math.random() * 0.6);
       }, 100);
     };
 
-    utterance.onend = () => {
+    const cleanupSpeech = () => {
       setIsSpeaking(false);
       setAmplitude(0);
       if (simInterval) clearInterval(simInterval);
+      if (fallbackTimeout) clearTimeout(fallbackTimeout);
     };
 
-    utterance.onerror = () => {
-      setIsSpeaking(false);
-      setAmplitude(0);
-      if (simInterval) clearInterval(simInterval);
-    };
+    utterance.onend = cleanupSpeech;
+    utterance.onerror = cleanupSpeech;
+
+    // Safety duration fallback in case browser misses onend event
+    const approxDurationMs = Math.max(3500, (text.split(" ").length / 2.2) * 1000);
+    fallbackTimeout = setTimeout(cleanupSpeech, approxDurationMs);
 
     window.speechSynthesis.speak(utterance);
   };

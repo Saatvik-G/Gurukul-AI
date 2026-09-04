@@ -18,26 +18,40 @@ export const AvatarCanvas: React.FC<AvatarCanvasProps> = ({
   const [blink, setBlink] = useState(false);
   const [smoothedAmp, setSmoothedAmp] = useState(0);
 
-  // Smooth amplitude updates
+  // Dynamic speaking animation (combines Web Audio amplitude + natural speech cadence)
   useEffect(() => {
-    const target = isSpeaking ? Math.min(1, amplitude * 1.8) : 0;
-    const interval = setInterval(() => {
-      setSmoothedAmp((prev) => prev + (target - prev) * 0.35);
-    }, 30);
-    return () => clearInterval(interval);
+    let frameId: number;
+    let step = 0;
+
+    const animate = () => {
+      step += 0.2;
+      if (isSpeaking) {
+        // Natural phonetic syllable oscillation if amplitude is quiet
+        const rhythmicCadence = (Math.sin(step) * 0.35 + Math.sin(step * 2.3) * 0.25 + 0.4);
+        const effectiveTarget = amplitude > 0.05 ? amplitude * 1.8 : rhythmicCadence;
+        setSmoothedAmp((prev) => prev + (Math.min(1, Math.max(0.1, effectiveTarget)) - prev) * 0.4);
+      } else {
+        setSmoothedAmp((prev) => prev * 0.7);
+      }
+      frameId = requestAnimationFrame(animate);
+    };
+
+    frameId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frameId);
   }, [amplitude, isSpeaking]);
 
   // Natural blinking cycle
   useEffect(() => {
     const blinkInterval = setInterval(() => {
       setBlink(true);
-      setTimeout(() => setBlink(false), 180);
-    }, 4000 + Math.random() * 2000);
+      setTimeout(() => setBlink(false), 160);
+    }, 3800 + Math.random() * 2000);
     return () => clearInterval(blinkInterval);
   }, []);
 
   // Calculate dynamic mouth geometry
-  const mouthOpenHeight = Math.max(3, smoothedAmp * 22);
+  const isMouthOpen = isSpeaking && smoothedAmp > 0.06;
+  const mouthOpenHeight = Math.max(4, smoothedAmp * 24);
   const mouthWidth = 24 + smoothedAmp * 8;
   const mouthY = 152 + smoothedAmp * 3;
 
@@ -49,7 +63,10 @@ export const AvatarCanvas: React.FC<AvatarCanvasProps> = ({
           width={size}
           height={size}
           viewBox="0 0 240 240"
-          className="relative z-10"
+          className="relative z-10 transition-transform duration-150"
+          style={{
+            transform: isSpeaking ? `translateY(${Math.sin(Date.now() / 250) * 1.2}px)` : "none",
+          }}
         >
           <defs>
             <linearGradient id="guruSkin" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -145,9 +162,10 @@ export const AvatarCanvas: React.FC<AvatarCanvasProps> = ({
             fill="#2A2A26"
           />
 
-          {/* Mouth - Amplitude Driven */}
-          {smoothedAmp > 0.08 ? (
+          {/* Mouth - Amplitude & Cadence Driven */}
+          {isMouthOpen ? (
             <g>
+              {/* Mouth cavity */}
               <ellipse
                 cx="120"
                 cy={mouthY}
@@ -155,6 +173,7 @@ export const AvatarCanvas: React.FC<AvatarCanvasProps> = ({
                 ry={mouthOpenHeight / 2}
                 fill="#7f1d1d"
               />
+              {/* Upper teeth */}
               <path
                 d={`M ${120 - mouthWidth / 3} ${mouthY - mouthOpenHeight / 4} Q 120 ${
                   mouthY - mouthOpenHeight / 6
@@ -163,8 +182,17 @@ export const AvatarCanvas: React.FC<AvatarCanvasProps> = ({
                 strokeWidth="2"
                 strokeLinecap="round"
               />
+              {/* Tongue */}
+              <ellipse
+                cx="120"
+                cy={mouthY + mouthOpenHeight / 4}
+                rx={mouthWidth / 3}
+                ry={mouthOpenHeight / 4}
+                fill="#e11d48"
+              />
             </g>
           ) : (
+            /* Closed smiling mouth */
             <path
               d="M 106 150 Q 120 155 134 150"
               stroke="#2A2A26"
@@ -181,14 +209,16 @@ export const AvatarCanvas: React.FC<AvatarCanvasProps> = ({
           />
         </svg>
 
-        {/* Status label under avatar in Work Sans (no monospace) */}
+        {/* Status label under avatar */}
         <div className="mt-2 text-[11px] font-body text-[#8E9C88] flex items-center gap-1.5">
           <span
             className={`w-2 h-2 rounded-full ${
-              isSpeaking ? "bg-[#E3A23B]" : "bg-[#8E9C88]"
+              isSpeaking ? "bg-[#E3A23B] animate-pulse" : "bg-[#8E9C88]"
             }`}
           />
-          <span>{isSpeaking ? "Speaking" : "Listening"}</span>
+          <span className={isSpeaking ? "text-[#E3A23B] font-medium" : "text-[#8E9C88]"}>
+            {isSpeaking ? "Speaking" : "Listening"}
+          </span>
         </div>
       </div>
     </div>
