@@ -20,11 +20,11 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
   const [displayedLength, setDisplayedLength] = useState(0);
   const [isWiping, setIsWiping] = useState(false);
 
-  // Trigger chalk eraser wipe motion on reexplanation
+  // Trigger dramatic chalk eraser wipe animation on re-explanation (~850ms)
   useEffect(() => {
     if (isReexplanation) {
       setIsWiping(true);
-      const timer = setTimeout(() => setIsWiping(false), 450);
+      const timer = setTimeout(() => setIsWiping(false), 850);
       return () => clearTimeout(timer);
     }
   }, [isReexplanation, fullText]);
@@ -64,27 +64,52 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
 
   return (
     <div
-      className={`w-full p-5 border border-[#8E9C88] bg-[#EFE9DA] text-[#2A2A26] rounded-sm transition-all relative ${
-        isWiping ? "eraser-wipe-active" : ""
-      } ${
-        isReexplanation ? "border-l-4 border-l-[#B5482F]" : ""
+      className={`w-full p-5 border bg-[#EFE9DA] text-[#2A2A26] rounded-sm transition-all relative overflow-hidden ${
+        isReexplanation
+          ? "border-2 border-[#B5482F] bg-[#F7F2E7]"
+          : "border border-[#8E9C88]"
       }`}
     >
+      {/* Visual Chalk Eraser / Duster Sweep Bar Overlay */}
+      {isWiping && (
+        <div className="absolute inset-0 z-30 pointer-events-none overflow-hidden">
+          {/* Sweeping Duster Bar */}
+          <div className="eraser-duster-bar absolute top-0 bottom-0 w-16 bg-gradient-to-r from-transparent via-[#E3A23B]/60 to-[#8E9C88]/70 flex items-center justify-center shadow-lg">
+            {/* Wooden Duster Handle */}
+            <div className="w-5 h-20 bg-[#6d4c41] border-2 border-[#3e2723] rounded-xs shadow-md flex items-center justify-center">
+              <span className="text-[8px] text-[#F3EFE3] font-bold rotate-90 tracking-tighter">
+                DUSTER
+              </span>
+            </div>
+          </div>
+          {/* Chalk dust mist overlay */}
+          <div className="absolute inset-0 bg-white/30 backdrop-blur-xs animate-pulse" />
+        </div>
+      )}
+
       {/* Header bar */}
       <div className="flex items-center justify-between pb-2 mb-3 border-b border-[#8E9C88]/30 text-xs font-body">
-        <span
-          className={`font-semibold ${
-            isReexplanation ? "text-[#B5482F]" : "text-[#2A2A26]"
-          }`}
-        >
-          {isReexplanation
-            ? language === "hi"
-              ? "पुनर्व्याख्या (नई सादृश्य)"
-              : "Re-explanation (Novel Analogy)"
-            : language === "hi"
-            ? "गुरु व्याख्या"
-            : "Guru Explanation"}
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            className={`font-semibold ${
+              isReexplanation ? "text-[#B5482F] font-bold" : "text-[#2A2A26]"
+            }`}
+          >
+            {isReexplanation
+              ? language === "hi"
+                ? "💡 अनुकूलित पुनर्व्याख्या (नई सादृश्यता)"
+                : "💡 Adaptive Re-Explanation (Novel Analogy)"
+              : language === "hi"
+              ? "गुरु व्याख्या"
+              : "Guru Explanation"}
+          </span>
+
+          {isReexplanation && (
+            <span className="text-[10px] px-2 py-0.5 bg-[#B5482F] text-[#F3EFE3] font-bold rounded-xs">
+              Eraser Wipe Applied
+            </span>
+          )}
+        </div>
 
         {onReplay && (
           <button
@@ -96,13 +121,15 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
         )}
       </div>
 
-      {/* Main explanation body */}
-      <p className="text-base sm:text-lg leading-relaxed font-body text-[#2A2A26]">
-        {fullText.slice(0, displayedLength)}
-        {isSpeaking && displayedLength < fullText.length && (
-          <span className="inline-block w-2 h-4 ml-1 bg-[#E3A23B] align-middle" />
-        )}
-      </p>
+      {/* Main explanation body with chalk reveal effect */}
+      <div className={isWiping ? "eraser-reveal-text" : ""}>
+        <p className="text-base sm:text-lg leading-relaxed font-body text-[#2A2A26]">
+          {fullText.slice(0, displayedLength)}
+          {isSpeaking && displayedLength < fullText.length && (
+            <span className="inline-block w-2 h-4 ml-1 bg-[#E3A23B] align-middle" />
+          )}
+        </p>
+      </div>
     </div>
   );
 };

@@ -67,27 +67,47 @@ body {
   box-shadow: 1px 2px 4px rgba(0, 0, 0, 0.15);
 }
 
-/* Single motion moment: chalk eraser wipe transition on reexplaining (~400ms) */
-@keyframes chalkEraserWipe {
+/* DRAMATIC CHALK ERASER DUSTER SWEEP ANIMATION (~800ms) */
+@keyframes eraserDusterSweep {
   0% {
-    clip-path: inset(0 0 0 0);
-    opacity: 0.3;
-    filter: blur(4px);
+    left: -10%;
+    opacity: 0;
   }
-  50% {
-    clip-path: inset(0 100% 0 0);
-    opacity: 0.7;
-    filter: blur(2px);
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
   }
   100% {
-    clip-path: inset(0 0 0 0);
-    opacity: 1;
-    filter: blur(0);
+    left: 110%;
+    opacity: 0;
   }
 }
 
-.eraser-wipe-active {
-  animation: chalkEraserWipe 450ms cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+@keyframes chalkWipeTextReveal {
+  0% {
+    opacity: 0.1;
+    filter: blur(4px);
+    transform: scale(0.99);
+  }
+  60% {
+    opacity: 0.5;
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1);
+  }
+}
+
+.eraser-duster-bar {
+  animation: eraserDusterSweep 850ms cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+.eraser-reveal-text {
+  animation: chalkWipeTextReveal 850ms ease-out forwards;
 }
 
 /* Rough chalk dust border for avatar inset window */

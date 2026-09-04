@@ -235,7 +235,10 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
         if (!data.evaluation.correct && data.reExplanation) {
           setCurrentState("reexplaining");
           setTeacherMood("correcting");
-          setCurrentExplanation(data.reExplanation);
+          setCurrentExplanation({
+            ...data.reExplanation,
+            is_reexplanation: true,
+          });
           speakText(
             `${data.evaluation.feedback} ${data.reExplanation.spoken_text}`,
             session.language
@@ -387,14 +390,32 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
           {/* Checkpoint Question & Student Paper Note Answer */}
           <div className="border border-[#8E9C88]/50 bg-[#1B2D24] p-5 rounded-sm">
             {/* Question Label */}
-            <div className="text-xs text-[#E3A23B] font-serif-heading font-bold mb-1">
-              {isFeynmanMode
-                ? isHi
-                  ? "फेनमैन विधि: अपनी समझ से समझाइए"
-                  : "Feynman Method: Explain in your own words"
-                : isHi
-                ? "जांच प्रश्न"
-                : "Checkpoint Question"}
+            <div className="flex items-center gap-2 mb-1">
+              <span
+                className={`text-xs font-serif-heading font-bold ${
+                  currentExplanation?.is_reexplanation
+                    ? "text-[#B5482F]"
+                    : "text-[#E3A23B]"
+                }`}
+              >
+                {currentExplanation?.is_reexplanation
+                  ? isHi
+                    ? "💡 नया सादृश्य परीक्षण प्रश्न (पुनर्व्याख्या)"
+                    : "💡 Novel Analogy Checkpoint (Re-explanation)"
+                  : isFeynmanMode
+                  ? isHi
+                    ? "फेनमैन विधि: अपनी समझ से समझाइए"
+                    : "Feynman Method: Explain in your own words"
+                  : isHi
+                  ? "जांच प्रश्न"
+                  : "Checkpoint Question"}
+              </span>
+
+              {currentExplanation?.is_reexplanation && (
+                <span className="text-[10px] px-2 py-0.5 bg-[#B5482F] text-[#F3EFE3] font-bold rounded-xs">
+                  Misconception Pivot
+                </span>
+              )}
             </div>
             <ChalkWavyLine className="w-24 mb-2 opacity-75" />
 
