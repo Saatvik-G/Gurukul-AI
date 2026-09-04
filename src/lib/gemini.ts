@@ -272,6 +272,48 @@ Output JSON ONLY:
 // ============================================================================
 // 5. TEACHING LOOP: ANSWER EVALUATION (Supports Feynman Mode & Gaps)
 // ============================================================================
+export function isAnswerEvasiveOrUncertain(answer: string): boolean {
+  if (!answer || typeof answer !== "string") return true;
+  const cleaned = answer
+    .toLowerCase()
+    .trim()
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (cleaned.length === 0) return true;
+
+  // Exact or contains evasive/uncertain markers
+  const evasivePatterns = [
+    /\b(i\s+)?(do\s+no|do\s+not|dont|don\s*t|didnt|didn\s*t)\s+know\b/,
+    /\b(i\s+)?(have\s+no|dont\s+have|don\s*t\s+have|no)\s+(idea|clue|thought)\b/,
+    /\b(not\s+sure|im\s+not\s+sure|i\s+am\s+not\s+sure)\b/,
+    /\b(idk|dunno|idc|n\/a|na|none)\b/,
+    /\b(forgot|cant\s+remember|can\s*t\s+remember|cannot\s+remember)\b/,
+    /\b(pass|skip|nothing|no|nope|nah|idontknow)\b/,
+    /\b(nahi\s+pata|pata\s+nahi|pata\s+ni|maloom\s+nahi|nahi\s+maloom|nahi\s+janta|mujhe\s+nahi\s+pata)\b/,
+    /(पता\s*नहीं|नहीं\s*पता|मालूम\s*नहीं|मुझे\s*नहीं\s*पता|नहीं\s*मालूम|गलत)/,
+  ];
+
+  for (const pattern of evasivePatterns) {
+    if (pattern.test(cleaned)) {
+      return true;
+    }
+  }
+
+  // Answer is too short to be an explanation (< 6 characters)
+  if (cleaned.length < 6) {
+    return true;
+  }
+
+  // Repeated single character like 'aaaaaa'
+  if (/^(.)\1+$/.test(cleaned)) {
+    return true;
+  }
+
+  return false;
+}
+
 export async function evaluateStudentAnswer({
   conceptName,
   question,
@@ -287,9 +329,36 @@ export async function evaluateStudentAnswer({
   language: Language;
   interactionType?: InteractionType;
 }): Promise<EvaluationResult> {
+  const isHi = language === "hi";
+
+  // Fast-path for evasive / uncertain answers ("i do no know", "idk", "no idea", etc.)
+  if (isAnswerEvasiveOrUncertain(studentAnswer)) {
+    return {
+      understood: false,
+      gaps: [
+        isHi
+          ? "शिक्षार्थी ने अनिश्चितता व्यक्त की या व्याख्या प्रस्तुत नहीं की।"
+          : "Learner expressed uncertainty or did not provide an explanation of the core mechanism."
+      ],
+      praise_point: isHi
+        ? "स्पष्ट रूप से साझा करने के लिए धन्यवाद।"
+        : "Thank you for letting me know where you're at.",
+      correct: false,
+      misconception: isHi
+        ? "अवधारणा की समझ अभी पूरी तरह स्पष्ट नहीं है।"
+        : "Learner indicated they do not know or are unsure of the core mechanism.",
+      confidence: 0.99,
+      feedback: isHi
+        ? "कोई बात नहीं! आइए इसे एक नए, बहुत ही सरल उदाहरण और सादृश्य से दोबारा समझते हैं।"
+        : "No problem at all! Let's wipe the slate clean and break this down with a fresh, intuitive mental model.",
+      suggested_depth: "beginner",
+      interaction_type: interactionType,
+    };
+  }
+
   const apiKey = getApiKey();
   if (!apiKey) {
-    return getFallbackEvaluation(studentAnswer, interactionType);
+    return getFallbackEvaluation(studentAnswer, interactionType, language);
   }
 
   try {
@@ -306,13 +375,14 @@ Student's Explanation: """${studentAnswer}"""
 Ground Truth / Reference: """${groundingContext}"""
 Language: ${language === "hi" ? "Hindi" : "English"}
 
-FEYNMAN DIAGNOSTIC TASK:
-1. Did the student demonstrate genuine conceptual understanding? ("understood": boolean)
-2. Identify specific conceptual gaps or missing causal links in their mental model: ("gaps": ["gap 1", "gap 2"]). If none, empty array [].
-3. Identify what the student articulated well: ("praise_point": "string")
-4. Provide encouraging feedback in ${language === "hi" ? "Hindi" : "English"}: ("feedback": "string")
-5. "correct": true if understood is true and gaps are minimal; false if there are critical missing mechanisms.
-6. "misconception": summarize the primary gap if incorrect, else null.
+STRICT PEDAGOGICAL GRADING RULES:
+1. Genuine Feynman understanding requires explaining the underlying mechanism/process in their own words.
+2. If the student expresses uncertainty, lack of knowledge (e.g., 'don't know', 'not sure'), gives a tautology, or provides an answer missing the core mechanism, you MUST set "understood": false, "correct": false, and summarize the primary gap in "misconception".
+3. NEVER mark an uncertain, evasive, or shallow response as understood or correct.
+4. "gaps": array of specific missing causal links or conceptual mistakes. If correct, empty array [].
+5. "praise_point": what the student articulated well (or acknowledge their effort).
+6. "feedback": constructive, encouraging guidance in ${language === "hi" ? "Hindi" : "English"}.
+7. "correct": true ONLY if understood is true and gaps are non-critical; false otherwise.
 
 Return ONLY JSON:
 {
@@ -333,6 +403,11 @@ Student's Answer: """${studentAnswer}"""
 Ground Truth: """${groundingContext}"""
 Language: ${language === "hi" ? "Hindi" : "English"}
 
+STRICT PEDAGOGICAL GRADING RULES:
+1. If the student's answer expresses lack of knowledge, is incorrect, or is evasive, you MUST set "correct": false and provide a clear "misconception".
+2. NEVER mark 'don't know', 'not sure', blank, or evasive responses as correct under any circumstance.
+3. If correct, "correct": true, "misconception": null.
+
 Return ONLY JSON:
 {
   "correct": boolean,
@@ -348,7 +423,7 @@ Return ONLY JSON:
     return parsed;
   } catch (error) {
     console.error("Gemini evaluateStudentAnswer error, using fallback:", error);
-    return getFallbackEvaluation(studentAnswer, interactionType);
+    return getFallbackEvaluation(studentAnswer, interactionType, language);
   }
 }
 
@@ -626,31 +701,51 @@ function getFallbackExplanation(concept: ConceptPlan, chunks: ExtractedConceptCh
   };
 }
 
-function getFallbackEvaluation(answer: string, interactionType: InteractionType = "question"): EvaluationResult {
-  const lower = answer.toLowerCase();
-  const isWrong = lower.includes("not sure") || lower.includes("don't know") || lower.includes("गलत") || lower.length < 8;
+function getFallbackEvaluation(
+  answer: string,
+  interactionType: InteractionType = "question",
+  language: Language = "en"
+): EvaluationResult {
+  const isHi = language === "hi";
+  const isUncertain = isAnswerEvasiveOrUncertain(answer);
+  const isTooShort = (answer || "").trim().length < 15;
+  const isWrong = isUncertain || isTooShort;
 
   if (interactionType === "feynman") {
     if (isWrong) {
       return {
         understood: false,
-        gaps: ["Missing mechanical transformation step", "Confused causal triggers"],
-        praise_point: "You recognized the initial premise.",
+        gaps: [
+          isHi
+            ? "शिक्षार्थी ने अवधारणा के मूल तंत्र या अवस्था परिवर्तन की व्याख्या नहीं की।"
+            : "Missing core operational mechanism and causal transitions.",
+        ],
+        praise_point: isHi
+          ? "सच्चाई से साझा करने के लिए धन्यवाद।"
+          : "Thank you for letting me know where you stand.",
         correct: false,
-        misconception: "Surface-level summary missing the transformation mechanism",
-        confidence: 0.88,
-        feedback: "Good start, but you missed explaining how the state transitions from input to output.",
+        misconception: isHi
+          ? "अवधारणा की समझ अभी पूरी तरह स्पष्ट नहीं है।"
+          : "Learner expressed uncertainty or gave an incomplete conceptual breakdown.",
+        confidence: 0.95,
+        feedback: isHi
+          ? "कोई बात नहीं! आइए इसे एक नए, बहुत ही सरल उदाहरण से समझते हैं।"
+          : "No worries! Let's build the intuition from scratch with a fresh, simple analogy.",
         interaction_type: "feynman",
       };
     }
     return {
       understood: true,
       gaps: [],
-      praise_point: "Clear intuitive breakdown of the core mechanism.",
+      praise_point: isHi
+        ? "अवधारणा का सटीक और स्पष्ट विवरण।"
+        : "Clear intuitive breakdown of the core mechanism.",
       correct: true,
       misconception: null,
       confidence: 0.95,
-      feedback: "Brilliant explanation in your own words! You captured the full intuition.",
+      feedback: isHi
+        ? "बहुत बढ़िया व्याख्या! आपने इस अवधारणा के मुख्य सिद्धांत को अपनी भाषा में सरलता से समझा दिया।"
+        : "Brilliant explanation in your own words! You captured the full intuition.",
       interaction_type: "feynman",
     };
   }
@@ -658,9 +753,13 @@ function getFallbackEvaluation(answer: string, interactionType: InteractionType 
   if (isWrong) {
     return {
       correct: false,
-      misconception: "Surface-level intuition without mechanical causation",
-      confidence: 0.88,
-      feedback: "Good try! However, there is a subtle misconception regarding how the components interact.",
+      misconception: isHi
+        ? "अवधारणा की समझ अभी पूरी तरह स्पष्ट नहीं है।"
+        : "Learner expressed uncertainty or gave an incomplete answer.",
+      confidence: 0.95,
+      feedback: isHi
+        ? "कोई बात नहीं! आइए इसे एक नए उदाहरण से समझते हैं।"
+        : "No problem! Let's look at this through a different and clearer perspective.",
       suggested_depth: "beginner",
       interaction_type: "question",
     };
@@ -669,7 +768,9 @@ function getFallbackEvaluation(answer: string, interactionType: InteractionType 
     correct: true,
     misconception: null,
     confidence: 0.94,
-    feedback: "Excellent reasoning! You captured the core principle accurately.",
+    feedback: isHi
+      ? "शानदार! आपने सही उत्तर दिया है।"
+      : "Excellent reasoning! You captured the core principle accurately.",
     suggested_depth: "intermediate",
     interaction_type: "question",
   };
