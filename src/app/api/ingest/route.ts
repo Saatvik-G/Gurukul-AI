@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractStructuredConcepts, generateEmbedding } from "@/lib/gemini";
-import { saveConceptChunks, saveSession } from "@/lib/supabase";
+import { saveConceptChunks, saveSession } from "@/lib/db";
 import { ExtractedConceptChunk, Language, LearnerDepth, Session } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
@@ -29,10 +29,8 @@ export async function POST(req: NextRequest) {
           topicTitle = fileName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
         }
         const buffer = await file.arrayBuffer();
-        // Convert plain text or extract readable text from binary buffers
         const decoder = new TextDecoder("utf-8", { fatal: false });
         const decodedText = decoder.decode(buffer);
-        // Clean non-printable characters for structured ingestion
         rawText = decodedText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, " ").slice(0, 30000);
       }
     } else {

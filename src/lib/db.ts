@@ -1,0 +1,376 @@
+import { neon } from "@neondatabase/serverless";
+import {
+  AssessmentResult,
+  ExtractedConceptChunk,
+  LearnerProfile,
+  LessonPlan,
+  Session,
+} from "./types";
+
+const databaseUrl = process.env.DATABASE_URL || "";
+
+export const isNeonConfigured = Boolean(
+  databaseUrl && !databaseUrl.includes("your-neon-database-url")
+);
+
+const getSql = () => {
+  if (!isNeonConfigured) return null;
+  return neon(databaseUrl);
+};
+
+// ============================================================================
+// IN-MEMORY LOCAL FALLBACK STORE (Guarantees zero demo crashes)
+// ============================================================================
+const memoryStore = {
+  sessions: new Map<string, Session>(),
+  lessonPlans: new Map<string, LessonPlan>(),
+  concepts: new Map<string, ExtractedConceptChunk[]>(),
+  learnerProfiles: new Map<string, LearnerProfile>(),
+  assessmentResults: new Map<string, AssessmentResult[]>(),
+};
+
+// ============================================================================
+// 1. SESSIONS
+// ============================================================================
+export async function saveSession(session: Session): Promise<Session> {
+  const sql = getSql();
+  if (sql) {
+    try {
+      const rows = await sql`
+        INSERT INTO sessions (
+          id, user_id, title, state, current_concept_index,
+          language, target_depth, available_time_minutes, metadata, updated_at
+        ) VALUES (
+          ${session.id},
+          ${session.user_id || "default_user"},
+          ${session.title},
+          ${session.state},
+          ${session.current_concept_index || 0},
+          ${session.language || "en"},
+          ${session.target_depth || "beginner"},
+          ${session.available_time_minutes || 20},
+          ${JSON.stringify(session.metadata || {})},
+          clock_timestamp()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          state = EXCLUDED.state,
+          current_concept_index = EXCLUDED.current_concept_index,
+          language = EXCLUDED.language,
+          target_depth = EXCLUDED.target_depth,
+          available_time_minutes = EXCLUDED.available_time_minutes,
+          metadata = EXCLUDED.metadata,
+          updated_at = clock_timestamp()
+        RETURNING *;
+      `;
+      if (rows && rows.length > 0) return rows[0] as Session;
+    } catch (e) {
+      console.warn("Neon saveSession fallback notice:", e);
+    }
+  }
+
+  session.updated_at = new Date().toISOString();
+  if (!session.created_at) session.created_at = session.updated_at;
+  memoryStore.sessions.set(session.id, session);
+  return session;
+}
+
+export async function getSession(sessionId: string): Promise<Session | null> {
+  const sql = getSql();
+  if (sql) {
+    try {
+      const rows = await sql`SELECT * FROM sessions WHERE id = ${sessionId} LIMIT 1;`;
+      if (rows && rows.length > 0) return rows[0] as Session;
+    } catch (e) {
+      console.warn("Neon getSession fallback notice:", e);
+    }
+  }
+  return memoryStore.sessions.get(sessionId) || null;
+}
+
+// ============================================================================
+// 2. LESSON PLANS
+// ============================================================================
+export async function saveLessonPlan(plan: LessonPlan): Promise<LessonPlan> {
+  const sql = getSql();
+  if (sql && plan.session_id) {
+    try {
+      const rows = await sql`
+        INSERT INTO lesson_plans (session_id, concepts, total_time_minutes, language)
+        VALUES (
+          ${plan.session_id},
+          ${JSON.stringify(plan.concepts)},
+          ${plan.total_time_minutes || 20},
+          ${plan.language || "en"}
+        )
+        RETURNING *;
+      `;
+      if (rows && rows.length > 0) return rows[0] as LessonPlan;
+    } catch (e) {
+      console.warn("Neon saveLessonPlan fallback notice:", e);
+    }
+  }
+
+  if (plan.session_id) {
+    memoryStore.lessonPlans.set(plan.session_id, plan);
+  }
+  return plan;
+}
+
+export async function getLessonPlan(sessionId: string): Promise<LessonPlan | null> {
+  const sql = getSql();
+  if (sql) {
+    try {
+      const rows = await sql`
+        SELECT * FROM lesson_plans WHERE session_id = ${sessionId} ORDER BY created_at DESC LIMIT 1;
+      `;
+      if (rows && rows.length > 0) return rows[0] as LessonPlan;
+    } catch (e) {
+      console.warn("Neon getLessonPlan fallback notice:", e);
+    }
+  }
+  return memoryStore.lessonPlans.get(sessionId) || null;
+}
+
+// ============================================================================
+// 3. CONCEPTS & PGVECTOR SIMILARITY SEARCH
+// ============================================================================
+export async function saveConceptChunks(
+  sessionId: string,
+  chunks: ExtractedConceptChunk[]
+): Promise<void> {
+  const sql = getSql();
+  if (sql && chunks.length > 0) {
+    try {
+      for (const chunk of chunks) {
+        const vectorStr = chunk.embedding ? `[${chunk.embedding.join(",")}]` : null;
+        if (vectorStr) {
+          await sql`
+            INSERT INTO concepts (
+              session_id, section_name, concept_name, definition,
+              examples, content_chunk, embedding
+            ) VALUES (
+              ${sessionId},
+              ${chunk.section_name || null},
+              ${chunk.concept_name},
+              ${chunk.definition || null},
+              ${JSON.stringify(chunk.examples || [])},
+              ${chunk.content_chunk},
+              ${vectorStr}::vector
+            );
+          `;
+        } else {
+          await sql`
+            INSERT INTO concepts (
+              session_id, section_name, concept_name, definition,
+              examples, content_chunk
+            ) VALUES (
+              ${sessionId},
+              ${chunk.section_name || null},
+              ${chunk.concept_name},
+              ${chunk.definition || null},
+              ${JSON.stringify(chunk.examples || [])},
+              ${chunk.content_chunk}
+            );
+          `;
+        }
+      }
+      return;
+    } catch (e) {
+      console.warn("Neon saveConceptChunks fallback notice:", e);
+    }
+  }
+
+  memoryStore.concepts.set(sessionId, chunks);
+}
+
+export async function retrieveRelevantChunks(
+  sessionId: string,
+  queryEmbedding: number[],
+  topK = 3
+): Promise<ExtractedConceptChunk[]> {
+  const sql = getSql();
+  if (sql && queryEmbedding.length > 0) {
+    try {
+      const vectorStr = `[${queryEmbedding.join(",")}]`;
+      const rows = await sql`
+        SELECT
+          id,
+          session_id,
+          concept_name,
+          definition,
+          examples,
+          content_chunk,
+          1 - (embedding <=> ${vectorStr}::vector) AS similarity
+        FROM concepts
+        WHERE session_id = ${sessionId}
+        ORDER BY embedding <=> ${vectorStr}::vector ASC
+        LIMIT ${topK};
+      `;
+      if (rows && rows.length > 0) {
+        return rows.map((r: any) => ({
+          concept_name: r.concept_name,
+          definition: r.definition,
+          examples: typeof r.examples === "string" ? JSON.parse(r.examples) : r.examples || [],
+          content_chunk: r.content_chunk,
+          similarity: Number(r.similarity),
+        }));
+      }
+    } catch (e) {
+      console.warn("Neon retrieveRelevantChunks fallback notice:", e);
+    }
+  }
+
+  // In-memory cosine fallback
+  const sessionChunks = memoryStore.concepts.get(sessionId) || [];
+  if (sessionChunks.length === 0) return [];
+
+  const scored = sessionChunks.map((chunk) => {
+    let similarity = 0.5;
+    if (chunk.embedding && chunk.embedding.length === queryEmbedding.length) {
+      similarity = cosineSimilarity(queryEmbedding, chunk.embedding);
+    }
+    return { ...chunk, similarity };
+  });
+
+  scored.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+  return scored.slice(0, topK);
+}
+
+// ============================================================================
+// 4. LEARNER PROFILE
+// ============================================================================
+export async function getLearnerProfile(userId = "default_user"): Promise<LearnerProfile> {
+  const sql = getSql();
+  if (sql) {
+    try {
+      const rows = await sql`
+        SELECT * FROM learner_profile WHERE user_id = ${userId} LIMIT 1;
+      `;
+      if (rows && rows.length > 0) {
+        const r = rows[0];
+        return {
+          user_id: r.user_id,
+          strong_concepts: r.strong_concepts || [],
+          weak_concepts: r.weak_concepts || [],
+          learning_pace: r.learning_pace || "medium",
+          session_history: typeof r.session_history === "string" ? JSON.parse(r.session_history) : r.session_history || [],
+          updated_at: r.updated_at,
+        };
+      }
+    } catch (e) {
+      console.warn("Neon getLearnerProfile fallback notice:", e);
+    }
+  }
+
+  const existing = memoryStore.learnerProfiles.get(userId);
+  if (existing) return existing;
+
+  const defaultProfile: LearnerProfile = {
+    user_id: userId,
+    strong_concepts: [],
+    weak_concepts: [],
+    learning_pace: "medium",
+    session_history: [],
+    updated_at: new Date().toISOString(),
+  };
+  memoryStore.learnerProfiles.set(userId, defaultProfile);
+  return defaultProfile;
+}
+
+export async function updateLearnerProfile(
+  userId = "default_user",
+  strongConcepts: string[],
+  weakConcepts: string[],
+  sessionData?: { session_id: string; topic: string; score: number; date: string; weak_concepts: string[] }
+): Promise<LearnerProfile> {
+  const profile = await getLearnerProfile(userId);
+  const updatedStrong = Array.from(new Set([...profile.strong_concepts, ...strongConcepts]));
+  const updatedWeak = Array.from(new Set([...profile.weak_concepts.filter((w) => !strongConcepts.includes(w)), ...weakConcepts]));
+  const updatedHistory = profile.session_history ? [...profile.session_history] : [];
+  if (sessionData) {
+    updatedHistory.push(sessionData);
+  }
+
+  const updated: LearnerProfile = {
+    ...profile,
+    strong_concepts: updatedStrong,
+    weak_concepts: updatedWeak,
+    session_history: updatedHistory,
+    updated_at: new Date().toISOString(),
+  };
+
+  const sql = getSql();
+  if (sql) {
+    try {
+      await sql`
+        INSERT INTO learner_profile (user_id, strong_concepts, weak_concepts, session_history, updated_at)
+        VALUES (
+          ${userId},
+          ${updated.strong_concepts},
+          ${updated.weak_concepts},
+          ${JSON.stringify(updated.session_history)},
+          clock_timestamp()
+        )
+        ON CONFLICT (user_id) DO UPDATE SET
+          strong_concepts = EXCLUDED.strong_concepts,
+          weak_concepts = EXCLUDED.weak_concepts,
+          session_history = EXCLUDED.session_history,
+          updated_at = clock_timestamp();
+      `;
+    } catch (e) {
+      console.warn("Neon updateLearnerProfile fallback notice:", e);
+    }
+  }
+
+  memoryStore.learnerProfiles.set(userId, updated);
+  return updated;
+}
+
+// ============================================================================
+// 5. ASSESSMENT RESULTS
+// ============================================================================
+export async function saveAssessmentResult(result: AssessmentResult): Promise<AssessmentResult> {
+  const sql = getSql();
+  if (sql) {
+    try {
+      const rows = await sql`
+        INSERT INTO assessment_results (
+          session_id, user_id, score, total_questions,
+          strong_concepts, weak_concepts, recommended_next, detailed_responses
+        ) VALUES (
+          ${result.session_id},
+          ${result.user_id || "default_user"},
+          ${result.score},
+          ${result.total_questions},
+          ${result.strong_concepts},
+          ${result.weak_concepts},
+          ${result.recommended_next},
+          ${JSON.stringify(result.detailed_responses)}
+        )
+        RETURNING *;
+      `;
+      if (rows && rows.length > 0) return rows[0] as AssessmentResult;
+    } catch (e) {
+      console.warn("Neon saveAssessmentResult fallback notice:", e);
+    }
+  }
+
+  const existing = memoryStore.assessmentResults.get(result.session_id) || [];
+  existing.push(result);
+  memoryStore.assessmentResults.set(result.session_id, existing);
+  return result;
+}
+
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}

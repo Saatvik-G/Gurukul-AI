@@ -11,7 +11,7 @@ import {
   retrieveRelevantChunks,
   saveSession,
   updateLearnerProfile,
-} from "@/lib/supabase";
+} from "@/lib/db";
 import { ConceptPlan, Language, LearnerDepth, SessionState } from "@/lib/types";
 
 export async function POST(req: NextRequest) {

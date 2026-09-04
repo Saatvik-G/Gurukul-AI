@@ -12,7 +12,7 @@ Traditional online learning platforms and standard LLM chatbots suffer from thre
 2. **Repetition Over Adaptation**: When a student fails to understand an explanation, LLMs typically regenerate the same explanation with minor wording changes rather than diagnosing the specific misconception and pivoting to a completely novel analogy or mental model.
 3. **Hallucination & Lack of Grounding**: Free-form AI responses often stray from uploaded course materials or curriculum requirements.
 
-**Gurukul AI** solves this by creating a true cognitive teaching loop — grounded in uploaded documents via pgvector RAG, delivered with an amplitude-driven client-side animated avatar and Google Cloud TTS voice, and governed by an explicit pedagogical state machine that dismantles student misconceptions in real time.
+**Gurukul AI** solves this by creating a true cognitive teaching loop — grounded in uploaded documents via Neon pgvector RAG, delivered with an amplitude-driven client-side animated avatar and Google Cloud TTS voice, and governed by an explicit pedagogical state machine that dismantles student misconceptions in real time.
 
 ---
 
@@ -23,7 +23,7 @@ Gurukul AI is an adaptive, human-like AI teacher inspired by the timeless Indian
 - **Speaks with Synced Gestures**: Synthesizes natural voices in English and Hindi via Google Cloud TTS, while driving a lightweight client-side SVG avatar using Web Audio API RMS amplitude analysis (zero external API calls per frame).
 - **Probes & Diagnoses**: Pauses after each concept to ask targeted checkpoint questions.
 - **Pivots on Misconceptions**: If the student stumbles, the engine diagnoses the exact conceptual gap and automatically generates a fresh explanation using a completely different real-world analogy.
-- **Assesses & Remembers**: Evaluates mastery with an end-of-lesson diagnostic quiz and stores strong/weak concepts into a persistent learner profile to personalize subsequent lessons.
+- **Assesses & Remembers**: Evaluates mastery with an end-of-lesson diagnostic quiz and stores strong/weak concepts into a persistent learner profile on Neon PostgreSQL to personalize subsequent lessons.
 
 ---
 
@@ -72,17 +72,17 @@ Gurukul AI is an adaptive, human-like AI teacher inspired by the timeless Indian
                                      |                                             |                                             |
                                      v                                             v                                             v
                       +------------------------------+              +------------------------------+              +------------------------------+
-                      |   Google Gemini Flash API    |              |     Google Cloud TTS API     |              |     Supabase PostgreSQL      |
+                      |   Google Gemini Flash API    |              |     Google Cloud TTS API     |              |     Neon PostgreSQL (Serverless)
                       |  * Structured JSON extractor |              |  * en-US-Neural2-F (English) |              |  * pgvector (768-dim cos)    |
                       |  * Lesson plan generator     |              |  * hi-IN-Neural2-A (Hindi)   |              |  * sessions & lesson_plans   |
-                      |  * Grounded dialogue & RAG   |              |  * MP3 Base64 Streaming      |              |  * learner_profile           |
-                      |  * Misconception evaluator   |              |  * Audio In-Memory Cache     |              |  * assessment_results        |
+                      |  * Grounded dialogue & RAG   |              |  * Vercel Blob Audio Cache   |              |  * learner_profile           |
+                      |  * Misconception evaluator   |              |  * In-Memory Streaming Cache |              |  * assessment_results        |
                       +------------------------------+              +------------------------------+              +------------------------------+
 ```
 
 ### The Pedagogical State Machine
 The core engine follows a deterministic pedagogical cycle:
-1. `explaining`: Retrieves top-$k$ semantic chunks from pgvector for the current concept, citing retrieved context.
+1. `explaining`: Retrieves top-$k$ semantic chunks from Neon pgvector for the current concept, citing retrieved context.
 2. `questioning`: Presents a targeted conceptual checkpoint to test understanding.
 3. `evaluating`: Sends the student\'s answer + concept + grounding context to Gemini with a forced JSON schema: `{"correct": bool, "misconception": string | null, "confidence": float, "feedback": string}`.
 4. `reexplaining` *(Triggered when incorrect)*: Passes the prior explanation and student misconception to Gemini, commanding a *completely novel analogy* and creating a fresh checkpoint question.
@@ -103,8 +103,8 @@ The core engine follows a deterministic pedagogical cycle:
 
 1. **Ingestion & Extraction**: Uploaded files (or text topics) are analyzed by Gemini 1.5 Flash to extract a structured list of `{section_name, concept_name, definition, examples, content_chunk}`.
 2. **Chunk Vectorization**: Each chunk is embedded into 768-dimensional vectors using `text-embedding-004`.
-3. **Storage & Indexing**: Stored in the Supabase PostgreSQL `concepts` table using `vector(768)` with an IVFFlat cosine similarity index (`vector_cosine_ops`).
-4. **Retrieval**: Before every explanation or evaluation step, `match_concepts` RPC queries the vector store for top-$k$ chunks ($k=3$), ensuring zero hallucination.
+3. **Storage & Indexing**: Stored in Neon PostgreSQL `concepts` table using `vector(768)` with an IVFFlat cosine similarity index (`vector_cosine_ops`).
+4. **Retrieval**: Before every explanation or evaluation step, `retrieveRelevantChunks` queries Neon pgvector for top-$k$ chunks ($k=3$) using `<=>` cosine distance, ensuring zero hallucination.
 
 ---
 
@@ -120,7 +120,7 @@ All agent operations are partitioned into dedicated, single-responsibility funct
 
 ## Personalization Approach
 
-- **Cross-Session Cognitive Memory**: Weak concepts identified during checkpoint failures or post-lesson quizzes are recorded in `learner_profile.weak_concepts`.
+- **Cross-Session Cognitive Memory**: Weak concepts identified during checkpoint failures or post-lesson quizzes are recorded in `learner_profile.weak_concepts` in Neon PostgreSQL.
 - **Automatic Refresher Ingestion**: When initiating a new lesson, the planner reads the student\'s profile and injects targeted review segments before advancing.
 - **Dynamic In-Session Depth**: Students who answer with high confidence are smoothly promoted from `beginner` to `intermediate` or `advanced` depth.
 
@@ -145,7 +145,7 @@ All agent operations are partitioned into dedicated, single-responsibility funct
 ## Voice Implementation
 
 - **Google Cloud TTS REST API**: Direct server-side synthesis returning base64 MP3 streams.
-- **In-Memory & Storage Cache**: Repeated queries are cached to prevent redundant API consumption during demos.
+- **Vercel Blob & In-Memory Storage**: Repeated audio requests are cached via Vercel Blob (`@vercel/blob`) and in-memory cache to prevent redundant API consumption during demos.
 - **Resilient Fallback**: If API keys are unset or quotas are exceeded, the client gracefully falls back to the browser\'s native Web Speech API (`SpeechSynthesisUtterance`).
 
 ---
@@ -164,7 +164,8 @@ All agent operations are partitioned into dedicated, single-responsibility funct
 | :--- | :--- |
 | **Google Gemini Flash API** | Content extraction, lesson planning, grounded dialogue, diagnostic evaluation |
 | **Google Cloud TTS API** | Spoken audio synthesis in English & Hindi |
-| **Supabase (PostgreSQL + pgvector)** | Relational database, vector embeddings, and session state persistence |
+| **Neon (PostgreSQL + pgvector)** | Serverless relational database, pgvector embeddings, and session state persistence |
+| **Vercel Blob (`@vercel/blob`)** | Cloud storage for cached TTS audio payloads |
 | **Next.js 14+ (App Router)** | Full-stack framework & Serverless API routes |
 | **Tailwind CSS** | Styling and responsive design |
 | **KaTeX** | Real-time LaTeX mathematical equation rendering |
@@ -179,7 +180,7 @@ All agent operations are partitioned into dedicated, single-responsibility funct
 ### Prerequisites
 - Node.js 18+ or 20+
 - npm or pnpm
-- (Optional) Supabase project & Google Cloud / AI Studio API keys
+- (Optional) Neon project connection string & Google Cloud / AI Studio API keys
 
 ### Local Installation
 ```bash
@@ -192,10 +193,10 @@ npm install
 
 # 3. Configure environment variables
 cp .env.example .env.local
-# Open .env.local and add your GEMINI_API_KEY, GOOGLE_CLOUD_TTS_KEY, and SUPABASE credentials
+# Open .env.local and add your GEMINI_API_KEY, GOOGLE_CLOUD_TTS_KEY, and DATABASE_URL (from Neon)
 
-# 4. Set up Supabase Database (if using live Supabase)
-# Run the SQL migration script from supabase/schema.sql in the Supabase SQL Editor.
+# 4. Set up Neon Database (if using live Neon)
+# Run the SQL migration script from neon/schema.sql in the Neon SQL Editor.
 
 # 5. Run the development server
 npm run dev
@@ -209,16 +210,15 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 1. Push code to your GitHub repository:
    ```bash
    git add .
-   git commit -m "feat: complete Gurukul AI adaptive teacher implementation"
+   git commit -m "feat: migrate to Neon PostgreSQL with pgvector and Vercel Blob"
    git push origin main
    ```
 2. Import project into [Vercel](https://vercel.com).
 3. Under **Project Settings &rarr; Environment Variables**, add:
    - `GEMINI_API_KEY`
    - `GOOGLE_CLOUD_TTS_KEY`
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `DATABASE_URL` (Neon PostgreSQL connection string)
+   - `BLOB_READ_WRITE_TOKEN` (Automatically configured if Vercel Blob store is attached)
 4. Click **Deploy**.
 
 ---

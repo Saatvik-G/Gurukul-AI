@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "@supabase/supabase-js": "^2.115.0",
+    "@neondatabase/serverless": "^1.1.0",
+    "@vercel/blob": "^2.8.0",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "katex": "^0.18.5",

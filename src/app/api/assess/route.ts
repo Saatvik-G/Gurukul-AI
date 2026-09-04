@@ -6,7 +6,7 @@ import {
   getSession,
   saveAssessmentResult,
   updateLearnerProfile,
-} from "@/lib/supabase";
+} from "@/lib/db";
 import { AssessmentResult, Language, QuizQuestion } from "@/lib/types";
 
 export async function POST(req: NextRequest) {

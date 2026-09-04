@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLearnerProfile, getLessonPlan, getSession } from "@/lib/supabase";
+import { getLearnerProfile, getLessonPlan, getSession } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   try {

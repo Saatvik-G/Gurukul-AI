@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateLessonPlan } from "@/lib/gemini";
-import { getLearnerProfile, getSession, saveLessonPlan, saveSession } from "@/lib/supabase";
+import { getLearnerProfile, getSession, saveLessonPlan, saveSession } from "@/lib/db";
 import { Language, LearnerDepth, LessonPlan } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
