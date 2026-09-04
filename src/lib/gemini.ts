@@ -18,11 +18,12 @@ export const getGeminiClient = () => {
   return new GoogleGenerativeAI(key || "dummy_key");
 };
 
-// Active Gemini Flash models for high-availability cascading
+// Active fast Gemini Flash models for high-availability cascading
 const CASCADE_MODELS = [
-  "gemini-3.6-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-3.5-flash-lite",
   "gemini-3.5-flash",
-  "gemini-flash-latest",
 ];
 
 async function generateContentWithCascade(
@@ -173,6 +174,7 @@ PLANNING RULES:
 4. For 7 days: 7 concepts tagged with day: 1 through 7.
 5. FEYNMAN MODE: Mark roughly 1 in 3 concepts (especially core conceptual ones) with "interaction_type": "feynman". For these, the "checkpoint_question" MUST ask the student: "Explain [Concept] back to me in your own words, as if teaching someone who has never heard of it." For standard concepts, use "interaction_type": "question".
 6. visual_type MUST be one of: "equation", "diagram", "code", "timeline", "none".
+7. spoken_text MUST be a concise 3-4 sentence spoken teaching script in ${language === "hi" ? "Hindi (Conversational Devanagari)" : "English"} explaining the concept with intuition and warmth.
 
 Return ONLY a JSON object:
 {
@@ -182,6 +184,8 @@ Return ONLY a JSON object:
       "depth": "beginner" | "intermediate" | "advanced",
       "time_minutes": number,
       "visual_type": "equation" | "diagram" | "code" | "timeline" | "none",
+      "visual_content": "string (LaTeX, Mermaid, or code)",
+      "spoken_text": "string (engaging spoken explanation)",
       "checkpoint_question": "string",
       "interaction_type": "question" | "feynman",
       "day": number
@@ -723,12 +727,30 @@ function getFallbackLessonPlan(
       }
     }
 
+    let spokenText = "";
+    if (isHi) {
+      spokenText = `नमस्ते! आज हम "${title}" को समझेंगे। इस अवधारणा का मूल उद्देश्य यह है कि हम जटिल तंत्र को सरल और व्यवस्थित तरीके से समझ सकें। ध्यान से देखिए कि कैसे श्यामपट्ट पर यह प्रक्रिया संचालित होती है।`;
+    } else {
+      if (isQuantum) {
+        if (i === 1) {
+          spokenText = "Welcome to our quantum classroom. Unlike classical bits which are strictly 0 or 1, a qubit exists in a linear superposition of both states until measured. Look at the state vector on our chalkboard.";
+        } else if (i === 2) {
+          spokenText = "Now let us observe how the Hadamard gate rotates a qubit into an equal superposition, creating quantum interference. Notice the 50 percent probability collapse upon measurement.";
+        } else {
+          spokenText = "Here we connect multiple qubits through entanglement and quantum gates like CNOT, unlocking exponential computational states.";
+        }
+      } else {
+        spokenText = `Welcome! Today we examine "${title}". Notice on the chalkboard how the initial inputs undergo a structured transformation to produce the target outcome with zero ambiguity.`;
+      }
+    }
+
     concepts.push({
       name: title,
       depth: i === 1 ? depth : "intermediate",
       time_minutes: Math.floor(timeMinutes / count),
       visual_type: visualType,
       visual_content: visualContent,
+      spoken_text: spokenText,
       checkpoint_question: isFeynman
         ? isHi
           ? `अब अपनी समझ से मुझे समझाइए: "${title}" कैसे काम करता है?`

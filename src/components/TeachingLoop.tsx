@@ -44,7 +44,7 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
   const [currentExplanation, setCurrentExplanation] = useState<ExplanationResponse | null>(() => {
     if (!initialConcept) return null;
     return {
-      spoken_text: "",
+      spoken_text: initialConcept.spoken_text || "",
       visual_type: initialConcept.visual_type || "diagram",
       visual_content: initialConcept.visual_content || "",
       citations: [initialConcept.name],
@@ -57,7 +57,7 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
   const [studentAnswer, setStudentAnswer] = useState<string>("");
   const [lastEvaluation, setLastEvaluation] = useState<EvaluationResult | null>(null);
   const [retrievedChunks, setRetrievedChunks] = useState<any[]>([]);
-  const [isProcessing, setIsProcessing] = useState<boolean>(true);
+  const [isProcessing, setIsProcessing] = useState<boolean>(!initialConcept?.spoken_text);
   const [teacherMood, setTeacherMood] = useState<
     "welcoming" | "explaining" | "encouraging" | "correcting"
   >("explaining");
@@ -135,54 +135,134 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
           fallbackWebSpeech(text, lang);
         };
 
-        await audioRef.current.play();
-      } else {
-        fallbackWebSpeech(text, lang);
+        try {
+          await audioRef.current.play();
+          return;
+        } catch (playErr) {
+          fallbackWebSpeech(text, lang);
+          return;
+        }
       }
     } catch (e) {
-      fallbackWebSpeech(text, lang);
+      // Audio synthesis network or timeout -> fallback immediately
     }
+
+    fallbackWebSpeech(text, lang);
   };
 
   const fallbackWebSpeech = (text: string, lang: Language) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      setIsSpeaking(false);
+      simulateSpeechAnimation(text);
       return;
     }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang === "hi" ? "hi-IN" : "en-US";
-    utterance.rate = 1.0;
 
-    let simInterval: any;
-    let fallbackTimeout: any;
+    try {
+      window.speechSynthesis.resume();
+      if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+      }
 
-    utterance.onstart = () => {
-      setIsSpeaking(true);
-      simInterval = setInterval(() => {
-        setAmplitude(0.2 + Math.random() * 0.6);
-      }, 100);
-    };
+      setTimeout(() => {
+        try {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = lang === "hi" ? "hi-IN" : "en-US";
+          utterance.rate = 1.0;
+          utterance.pitch = 1.0;
 
-    const cleanupSpeech = () => {
+          // Select matching voice
+          const voices = window.speechSynthesis.getVoices();
+          if (voices && voices.length > 0) {
+            const targetLang = lang === "hi" ? "hi" : "en";
+            const matchedVoice = voices.find((v) =>
+              v.lang.toLowerCase().startsWith(targetLang) ||
+              (lang === "hi" && v.name.toLowerCase().includes("hindi")) ||
+              (lang === "en" && (v.name.includes("Natural") || v.name.includes("Google") || v.name.includes("Microsoft")))
+            );
+            if (matchedVoice) {
+              utterance.voice = matchedVoice;
+            }
+          }
+
+          let simInterval: any = null;
+          let fallbackTimeout: any = null;
+
+          const cleanupSpeech = () => {
+            setIsSpeaking(false);
+            setAmplitude(0);
+            if (simInterval) clearInterval(simInterval);
+            if (fallbackTimeout) clearTimeout(fallbackTimeout);
+          };
+
+          utterance.onstart = () => {
+            setIsSpeaking(true);
+            simInterval = setInterval(() => {
+              setAmplitude(0.25 + Math.random() * 0.55);
+            }, 80);
+          };
+
+          utterance.onend = cleanupSpeech;
+          utterance.onerror = () => cleanupSpeech();
+
+          const wordCount = text.split(/\s+/).length;
+          const estimatedDurationMs = Math.max(3000, (wordCount / 2.5) * 1000 + 500);
+          fallbackTimeout = setTimeout(cleanupSpeech, estimatedDurationMs);
+
+          setIsSpeaking(true);
+          window.speechSynthesis.speak(utterance);
+          window.speechSynthesis.resume();
+        } catch (speechErr) {
+          simulateSpeechAnimation(text);
+        }
+      }, 50);
+    } catch (e) {
+      simulateSpeechAnimation(text);
+    }
+  };
+
+  const simulateSpeechAnimation = (text: string) => {
+    setIsSpeaking(true);
+    const wordCount = text.split(/\s+/).length;
+    const durationMs = Math.max(3000, (wordCount / 2.8) * 1000);
+    
+    const interval = setInterval(() => {
+      setAmplitude(0.25 + Math.random() * 0.55);
+    }, 85);
+
+    setTimeout(() => {
+      clearInterval(interval);
       setIsSpeaking(false);
       setAmplitude(0);
-      if (simInterval) clearInterval(simInterval);
-      if (fallbackTimeout) clearTimeout(fallbackTimeout);
-    };
-
-    utterance.onend = cleanupSpeech;
-    utterance.onerror = cleanupSpeech;
-
-    // Safety duration fallback in case browser misses onend event
-    const approxDurationMs = Math.max(3500, (text.split(" ").length / 2.2) * 1000);
-    fallbackTimeout = setTimeout(cleanupSpeech, approxDurationMs);
-
-    window.speechSynthesis.speak(utterance);
+    }, durationMs);
   };
 
   // Trigger Explanation for the Concept
   const triggerExplanation = async (conceptIdx = currentConceptIndex) => {
+    const concept = lessonPlan.concepts[conceptIdx] || lessonPlan.concepts[0];
+    
+    // If spoken_text and visual_content already exist in the plan, start speaking immediately!
+    if (concept && concept.spoken_text) {
+      const speechLine =
+        conceptIdx === 0 && priorMemoryCallback
+          ? `${priorMemoryCallback} ${concept.spoken_text}`
+          : concept.spoken_text;
+
+      setCurrentExplanation({
+        spoken_text: concept.spoken_text,
+        visual_type: concept.visual_type || "diagram",
+        visual_content: concept.visual_content || "",
+        citations: [concept.name],
+        concept_name: concept.name,
+        checkpoint_question: concept.checkpoint_question || "",
+        interaction_type: concept.interaction_type || "question",
+      });
+      setCurrentState("questioning");
+      setIsProcessing(false);
+      setTeacherMood("explaining");
+
+      speakText(speechLine, session.language);
+      return;
+    }
+
     setIsProcessing(true);
     setTeacherMood("explaining");
     setCurrentState("explaining");
@@ -205,10 +285,9 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
         if (data.priorMemoryCallback) setPriorMemoryCallback(data.priorMemoryCallback);
         setCurrentState("questioning");
 
-        // If this is the start and there is a prior memory callback, weave it in
         const speechLine =
-          conceptIdx === 0 && priorMemoryCallback
-            ? `${priorMemoryCallback} ${data.explanation.spoken_text}`
+          conceptIdx === 0 && (data.priorMemoryCallback || priorMemoryCallback)
+            ? `${data.priorMemoryCallback || priorMemoryCallback} ${data.explanation.spoken_text}`
             : data.explanation.spoken_text;
 
         speakText(speechLine, session.language);

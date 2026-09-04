@@ -17,6 +17,7 @@ export interface ConceptPlan {
   time_minutes: number;
   visual_type: VisualType;
   visual_content?: string;
+  spoken_text?: string;
   checkpoint_question: string;
   interaction_type?: InteractionType; // "question" or "feynman"
   expected_key_points?: string[];

@@ -54,3 +54,33 @@ export class AudioAmplitudeTracker {
     this.isConnected = false;
   }
 }
+
+/**
+ * Prime and unlock browser audio and speech synthesis upon user gesture
+ */
+export function unlockAudioAndSpeech(): void {
+  if (typeof window === "undefined") return;
+  try {
+    // Unlock Web Audio
+    const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioCtxClass) {
+      const dummyCtx = new AudioCtxClass();
+      if (dummyCtx.state === "suspended") {
+        dummyCtx.resume().catch(() => {});
+      }
+      setTimeout(() => dummyCtx.close().catch(() => {}), 1000);
+    }
+
+    // Unlock Speech Synthesis
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.resume();
+      const dummyUtterance = new SpeechSynthesisUtterance(" ");
+      dummyUtterance.volume = 0.01;
+      dummyUtterance.rate = 10;
+      window.speechSynthesis.speak(dummyUtterance);
+    }
+  } catch (e) {
+    // Ignore harmless priming exceptions
+  }
+}
+

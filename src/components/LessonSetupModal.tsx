@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { unlockAudioAndSpeech } from "@/lib/audio-analyser";
 import { Language, LearnerDepth } from "@/lib/types";
 import { ChalkWavyLine } from "./ChalkWavyLine";
 
@@ -47,6 +48,7 @@ export const LessonSetupModal: React.FC<LessonSetupModalProps> = ({
     if (activeTab === "topic" && !topic.trim()) return;
     if (activeTab === "upload" && !selectedFile) return;
 
+    unlockAudioAndSpeech();
     setIsLoading(true);
     onStartLesson({
       file: activeTab === "upload" ? selectedFile || undefined : undefined,

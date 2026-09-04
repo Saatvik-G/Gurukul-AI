@@ -7,6 +7,7 @@ import { LearnerProfileView } from "@/components/LearnerProfileView";
 import { LessonSetupModal } from "@/components/LessonSetupModal";
 import { Navbar } from "@/components/Navbar";
 import { TeachingLoop } from "@/components/TeachingLoop";
+import { unlockAudioAndSpeech } from "@/lib/audio-analyser";
 import { Language, LearnerDepth, LearnerProfile, LessonPlan, Session } from "@/lib/types";
 
 export default function Home() {
@@ -65,6 +66,7 @@ export default function Home() {
     depth: LearnerDepth;
     language: Language;
   }) => {
+    unlockAudioAndSpeech();
     setIsLoading(true);
     setIsSetupOpen(false);
     setLoadingMessage(
