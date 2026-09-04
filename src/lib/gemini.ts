@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
   ConceptPlan,
   EvaluationResult,
@@ -14,11 +14,27 @@ const getApiKey = () => process.env.GEMINI_API_KEY || "";
 
 export const getGeminiClient = () => {
   const key = getApiKey();
-  if (!key) {
-    console.warn("GEMINI_API_KEY is not set. Operating in fallback simulation mode.");
-  }
   return new GoogleGenerativeAI(key || "dummy_key");
 };
+
+// Candidate model cascade
+const MODEL_CANDIDATES = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-pro"];
+
+async function getWorkingModel(ai: GoogleGenerativeAI, jsonMode = true) {
+  for (const modelName of MODEL_CANDIDATES) {
+    try {
+      return ai.getGenerativeModel({
+        model: modelName,
+        generationConfig: jsonMode
+          ? { responseMimeType: "application/json", temperature: 0.2 }
+          : { temperature: 0.3 },
+      });
+    } catch {
+      continue;
+    }
+  }
+  return ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+}
 
 // ============================================================================
 // 1. INGESTION & CONCEPT EXTRACTION
@@ -35,13 +51,7 @@ export async function extractStructuredConcepts(
 
   try {
     const ai = getGeminiClient();
-    const model = ai.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.2,
-      },
-    });
+    const model = await getWorkingModel(ai, true);
 
     const prompt = `You are an expert pedagogical content extractor for Gurukul AI.
 Analyze the following ${sourceType === "upload" ? "document text" : "topic description"}:
@@ -71,7 +81,7 @@ Respond ONLY with a valid JSON array matching this schema:
     }
     throw new Error("Invalid format received from Gemini extraction");
   } catch (error) {
-    console.error("Gemini extractStructuredConcepts error:", error);
+    console.error("Gemini extractStructuredConcepts error, using fallback:", error);
     return getFallbackExtractedConcepts(rawContent, language);
   }
 }
@@ -82,7 +92,6 @@ Respond ONLY with a valid JSON array matching this schema:
 export async function generateEmbedding(text: string): Promise<number[]> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    // Generate deterministic 768-dim pseudo-embedding
     return generateDeterministicEmbedding(text, 768);
   }
 
@@ -95,7 +104,6 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     }
     return generateDeterministicEmbedding(text, 768);
   } catch (error) {
-    console.warn("Gemini generateEmbedding fallback error:", error);
     return generateDeterministicEmbedding(text, 768);
   }
 }
@@ -123,15 +131,9 @@ export async function generateLessonPlan({
 
   try {
     const ai = getGeminiClient();
-    const model = ai.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.3,
-      },
-    });
+    const model = await getWorkingModel(ai, true);
 
-    const is7Day = timeMinutes >= 1000 || timeMinutes === 7; // represented as 7 days or ~7000 mins
+    const is7Day = timeMinutes >= 1000 || timeMinutes === 7;
     const effectiveTime = is7Day ? 7 * 30 : timeMinutes;
 
     const weakConceptsInstruction =
@@ -178,7 +180,7 @@ Return ONLY a JSON object matching this schema:
     }
     throw new Error("Invalid lesson plan structure");
   } catch (error) {
-    console.error("Gemini generateLessonPlan error:", error);
+    console.error("Gemini generateLessonPlan error, using fallback:", error);
     return getFallbackLessonPlan(topicOrDocument, timeMinutes, depth, language, priorWeakConcepts);
   }
 }
@@ -206,13 +208,7 @@ export async function generateGroundedExplanation({
 
   try {
     const ai = getGeminiClient();
-    const model = ai.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.4,
-      },
-    });
+    const model = await getWorkingModel(ai, true);
 
     const contextText = retrievedChunks
       .map((c, i) => `[Chunk ${i + 1} - ${c.concept_name}]:\nDefinition: ${c.definition}\n${c.content_chunk}\nExamples: ${c.examples.join(", ")}`)
@@ -231,10 +227,10 @@ ${contextText || concept.name}
 """
 
 TEACHING INSTRUCTIONS:
-1. "spoken_text": A concise, clear, conversational 3-5 sentence explanation designed for speech (sound warm, inspiring, and clear like a master guru).
+1. "spoken_text": A concise, clear, conversational 3-5 sentence explanation designed for speech.
 2. "visual_content": Provide the exact code/syntax matching visual_type:
-   - If visual_type is "equation": valid LaTeX math string (e.g., E = mc^2 or \\int_{0}^{\\infty} e^{-x^2} dx)
-   - If visual_type is "diagram": valid Mermaid.js graph definition (e.g., graph TD\\n A[Input] --> B[Processing] --> C[Output])
+   - If visual_type is "equation": valid LaTeX math string (e.g., E = mc^2)
+   - If visual_type is "diagram": valid Mermaid.js graph definition (e.g., graph TD\n A[Input] --> B[Processing] --> C[Output])
    - If visual_type is "code": clean, commented runnable code snippet
    - If visual_type is "timeline": JSON array string or formatted steps (e.g., Step 1: Ingestion -> Step 2: Chunking -> Step 3: Retrieval)
    - If visual_type is "none": empty string ""
@@ -255,13 +251,13 @@ Output JSON ONLY:
     const parsed = JSON.parse(result.response.text()) as ExplanationResponse;
     return parsed;
   } catch (error) {
-    console.error("Gemini generateGroundedExplanation error:", error);
+    console.error("Gemini generateGroundedExplanation error, using fallback:", error);
     return getFallbackExplanation(concept, retrievedChunks, language);
   }
 }
 
 // ============================================================================
-// 5. TEACHING LOOP: ANSWER EVALUATION (Forced JSON: correct, misconception, confidence)
+// 5. TEACHING LOOP: ANSWER EVALUATION
 // ============================================================================
 export async function evaluateStudentAnswer({
   conceptName,
@@ -283,13 +279,7 @@ export async function evaluateStudentAnswer({
 
   try {
     const ai = getGeminiClient();
-    const model = ai.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.1,
-      },
-    });
+    const model = await getWorkingModel(ai, true);
 
     const prompt = `You are the diagnostic assessment engine for Gurukul AI.
 Evaluate the student's response to verify understanding of the concept: "${conceptName}".
@@ -300,8 +290,8 @@ Ground Truth / Reference Material: """${groundingContext}"""
 Language: ${language === "hi" ? "Hindi" : "English"}
 
 DIAGNOSTIC TASK:
-1. Determine if the student's answer is conceptually correct ("correct": true / false). Be generous on wording but strict on core conceptual misunderstanding.
-2. If wrong or partially incorrect, identify the EXACT "misconception" (e.g., "Confusing superposition with simultaneous classical states" or "Mistaking RNA for DNA polymerase").
+1. Determine if the student's answer is conceptually correct ("correct": true / false).
+2. If wrong or partially incorrect, identify the EXACT "misconception".
 3. Assign a "confidence" score between 0.0 and 1.0.
 4. Write constructive, empathetic "feedback" in ${language === "hi" ? "Hindi" : "English"}.
 
@@ -318,7 +308,7 @@ Return ONLY JSON:
     const parsed = JSON.parse(result.response.text()) as EvaluationResult;
     return parsed;
   } catch (error) {
-    console.error("Gemini evaluateStudentAnswer error:", error);
+    console.error("Gemini evaluateStudentAnswer error, using fallback:", error);
     return getFallbackEvaluation(studentAnswer);
   }
 }
@@ -348,13 +338,7 @@ export async function generateReExplanation({
 
   try {
     const ai = getGeminiClient();
-    const model = ai.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.5,
-      },
-    });
+    const model = await getWorkingModel(ai, true);
 
     const prompt = `You are Gurukul AI delivering a targeted adaptive re-explanation.
 The student gave an incorrect answer due to a specific misconception.
@@ -369,8 +353,7 @@ CRITICAL PEDAGOGICAL INSTRUCTIONS:
 1. DO NOT simply repeat the previous explanation.
 2. Introduce a COMPLETELY NOVEL analogy, intuitive mental model, or real-life comparison directly dismantling the identified misconception: "${misconception}".
 3. Keep spoken_text under 4-5 encouraging, crystal-clear spoken sentences.
-4. Provide a supportive visual_content if applicable.
-5. Formulate a FRESH, alternative checkpoint question to verify if the misconception has been resolved.
+4. Formulate a FRESH, alternative checkpoint question to verify if the misconception has been resolved.
 
 Return ONLY JSON:
 {
@@ -390,13 +373,13 @@ Return ONLY JSON:
     parsed.misconception_addressed = misconception;
     return parsed;
   } catch (error) {
-    console.error("Gemini generateReExplanation error:", error);
+    console.error("Gemini generateReExplanation error, using fallback:", error);
     return getFallbackReExplanation(concept, misconception, language);
   }
 }
 
 // ============================================================================
-// 7. END-OF-LESSON ASSESSMENT GENERATOR (3-5 Questions + Score Analysis)
+// 7. END-OF-LESSON ASSESSMENT GENERATOR
 // ============================================================================
 export async function generateAssessmentQuiz({
   coveredConcepts,
@@ -414,21 +397,13 @@ export async function generateAssessmentQuiz({
 
   try {
     const ai = getGeminiClient();
-    const model = ai.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.3,
-      },
-    });
+    const model = await getWorkingModel(ai, true);
 
     const prompt = `You are the master assessment creator for Gurukul AI.
 Create a 3 to 5 question multiple-choice quiz testing the student's mastery of the lesson: "${lessonTitle}".
 Covered Concepts:
 ${coveredConcepts.map((c, i) => `${i + 1}. ${c.name}: ${c.definition || ""}`).join("\n")}
 Language: ${language === "hi" ? "Hindi" : "English"}
-
-Generate 3 to 4 multiple choice questions testing deep understanding rather than mere memorization.
 
 Return ONLY a JSON array:
 [
@@ -437,7 +412,7 @@ Return ONLY a JSON array:
     "concept_name": "Concept name",
     "question": "Question string",
     "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correct_option_index": 0, // 0-indexed (0, 1, 2, or 3)
+    "correct_option_index": 0,
     "explanation": "Why this option is correct"
   }
 ]`;
@@ -449,7 +424,7 @@ Return ONLY a JSON array:
     }
     return getFallbackQuizQuestions(coveredConcepts, language);
   } catch (error) {
-    console.error("Gemini generateAssessmentQuiz error:", error);
+    console.error("Gemini generateAssessmentQuiz error, using fallback:", error);
     return getFallbackQuizQuestions(coveredConcepts, language);
   }
 }
