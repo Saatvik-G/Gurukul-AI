@@ -21,9 +21,14 @@ export const VisualRenderer: React.FC<VisualRendererProps> = ({
   const mathRef = useRef<HTMLDivElement>(null);
   const [mermaidSvg, setMermaidSvg] = useState<string>("");
 
+  const isDiagram = type === "diagram" || (type as string) === "mermaid" || content.trim().startsWith("graph ");
+  const isEquation = (type === "equation" || (type as string) === "latex") && !isDiagram;
+  const isCode = type === "code" && !isDiagram && !isEquation;
+  const isTimeline = type === "timeline" && !isDiagram && !isEquation;
+
   // LaTeX KaTeX rendering
   useEffect(() => {
-    if (type === "equation" && mathRef.current && content) {
+    if (isEquation && mathRef.current && content) {
       try {
         katex.render(content.replace(/\\n/g, "\n"), mathRef.current, {
           displayMode: true,
@@ -33,11 +38,11 @@ export const VisualRenderer: React.FC<VisualRendererProps> = ({
         console.warn("KaTeX render notice:", err);
       }
     }
-  }, [type, content]);
+  }, [isEquation, content]);
 
   // Mermaid diagram rendering
   useEffect(() => {
-    if (type === "diagram" && content) {
+    if (isDiagram && content) {
       try {
         mermaid.initialize({
           startOnLoad: false,
@@ -66,7 +71,7 @@ export const VisualRenderer: React.FC<VisualRendererProps> = ({
         console.warn("Mermaid error:", err);
       }
     }
-  }, [type, content]);
+  }, [isDiagram, content]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content);
@@ -87,13 +92,13 @@ export const VisualRenderer: React.FC<VisualRendererProps> = ({
       {/* Visual Header */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#E6DEC9] border-b border-[#8E9C88]/40 text-xs">
         <span className="font-semibold text-[#2A2A26]">
-          {type === "equation" && "Mathematical Equation"}
-          {type === "diagram" && "Concept Diagram"}
-          {type === "code" && "Code Snippet"}
-          {type === "timeline" && "Sequence Timeline"}
+          {isEquation && "Mathematical Equation"}
+          {isDiagram && "Concept Diagram"}
+          {isCode && "Code Snippet"}
+          {isTimeline && "Sequence Timeline"}
         </span>
 
-        {type === "code" && (
+        {isCode && (
           <button
             onClick={handleCopy}
             className="text-[11px] text-[#2A2A26] hover:text-[#E3A23B] underline underline-offset-2"
@@ -106,14 +111,14 @@ export const VisualRenderer: React.FC<VisualRendererProps> = ({
       {/* Visual Body */}
       <div className="p-4 flex items-center justify-center min-h-[160px] overflow-x-auto text-[#2A2A26]">
         {/* EQUATION */}
-        {type === "equation" && (
+        {isEquation && (
           <div className="text-center py-2 px-2 w-full text-lg">
             <div ref={mathRef} />
           </div>
         )}
 
         {/* DIAGRAM */}
-        {type === "diagram" && (
+        {isDiagram && (
           <div className="w-full flex justify-center py-1">
             {mermaidSvg ? (
               <div
@@ -127,14 +132,14 @@ export const VisualRenderer: React.FC<VisualRendererProps> = ({
         )}
 
         {/* CODE */}
-        {type === "code" && (
+        {isCode && (
           <pre className="w-full p-3 bg-[#22362B] text-[#F3EFE3] text-xs overflow-x-auto border border-[#8E9C88]/40 leading-relaxed rounded-sm">
             <code>{content}</code>
           </pre>
         )}
 
         {/* TIMELINE */}
-        {type === "timeline" && (
+        {isTimeline && (
           <div className="w-full space-y-2 py-1">
             {content.split(/->|\n/).map((step, idx) => {
               const clean = step.trim();

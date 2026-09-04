@@ -18,8 +18,12 @@ export const getGeminiClient = () => {
   return new GoogleGenerativeAI(key || "dummy_key");
 };
 
-// Candidate model cascade
-const MODEL_CANDIDATES = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-pro"];
+// Candidate model cascade with active Gemini models
+const MODEL_CANDIDATES = [
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+];
 
 async function getWorkingModel(ai: GoogleGenerativeAI, jsonMode = true) {
   for (const modelName of MODEL_CANDIDATES) {
@@ -34,7 +38,7 @@ async function getWorkingModel(ai: GoogleGenerativeAI, jsonMode = true) {
       continue;
     }
   }
-  return ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+  return ai.getGenerativeModel({ model: "gemini-3.6-flash" });
 }
 
 // ============================================================================
@@ -88,7 +92,7 @@ Respond ONLY with a valid JSON array matching this schema:
 }
 
 // ============================================================================
-// 2. VECTOR EMBEDDINGS (text-embedding-004)
+// 2. VECTOR EMBEDDINGS (gemini-embedding-2)
 // ============================================================================
 export async function generateEmbedding(text: string): Promise<number[]> {
   const apiKey = getApiKey();
@@ -98,10 +102,11 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 
   try {
     const ai = getGeminiClient();
-    const model = ai.getGenerativeModel({ model: "text-embedding-004" });
+    const model = ai.getGenerativeModel({ model: "gemini-embedding-2" });
     const result = await model.embedContent(text.slice(0, 2048));
     if (result.embedding?.values && result.embedding.values.length > 0) {
-      return result.embedding.values;
+      // 768-dim slice for pgvector compatibility
+      return result.embedding.values.slice(0, 768);
     }
     return generateDeterministicEmbedding(text, 768);
   } catch (error) {
@@ -596,6 +601,7 @@ function getFallbackLessonPlan(
 ): LessonPlan {
   const isHi = language === "hi";
   const is7Day = timeMinutes >= 1000 || timeMinutes === 7;
+  const cleanTopic = topic.trim() || "Core Concepts";
 
   const callback =
     priorWeakConcepts.length > 0
@@ -607,19 +613,19 @@ function getFallbackLessonPlan(
   if (is7Day) {
     return {
       concepts: Array.from({ length: 7 }, (_, i) => ({
-        name: isHi ? `दिन ${i + 1}: ${topic} का चरण ${i + 1}` : `Day ${i + 1}: ${topic} Milestone ${i + 1}`,
+        name: isHi ? `दिन ${i + 1}: ${cleanTopic} का चरण ${i + 1}` : `Day ${i + 1}: Foundations of ${cleanTopic} (Stage ${i + 1})`,
         depth: i < 2 ? "beginner" : i < 5 ? "intermediate" : "advanced",
         time_minutes: 30,
         visual_type: i % 2 === 0 ? "diagram" : "timeline",
-        visual_content: `graph LR\n  D${i + 1}[Day ${i + 1}] --> Goal[Mastery]`,
+        visual_content: `graph LR\n  D${i + 1}[Day ${i + 1}: Input] --> Proc[Mechanism] --> Goal[Mastery Output]`,
         checkpoint_question:
           i % 2 === 1
             ? isHi
               ? `अपनी भाषा में समझाएं कि दिन ${i + 1} का मुख्य तंत्र क्या है?`
-              : `Explain in your own words: what is the core mechanism of Day ${i + 1}?`
+              : `Explain in your own words: how does the core mechanism of Stage ${i + 1} work?`
             : isHi
             ? `दिन ${i + 1} का मुख्य सिद्धांत क्या है?`
-            : `What is the key takeaway of Day ${i + 1}?`,
+            : `What is the primary function of this principle in practice?`,
         interaction_type: i % 2 === 1 ? "feynman" : "question",
         day: i + 1,
       })),
@@ -634,11 +640,11 @@ function getFallbackLessonPlan(
 
   if (priorWeakConcepts.length > 0) {
     concepts.push({
-      name: isHi ? `पुनरावलोकन: ${priorWeakConcepts[0]}` : `Refresher: ${priorWeakConcepts[0]}`,
+      name: isHi ? `पुनरावलोकन: ${priorWeakConcepts[0]}` : `Refresher: ${priorWeakConcepts[0]} (Intuitive Model)`,
       depth: "beginner",
       time_minutes: Math.max(2, Math.floor(timeMinutes / (count + 1))),
       visual_type: "diagram",
-      visual_content: "graph TD\n  Weak[Prior Gap] --> Fixed[Mastered Concept]",
+      visual_content: `graph LR\n  PriorMisconception[Prior Confusion] -->|Key Insight| CoreShift[Correct Mental Model]\n  CoreShift --> Applied[Solid Understanding]`,
       checkpoint_question: isHi
         ? "अपनी भाषा में बताएं कि यह नया दृष्टिकोण पिछले संदेह को कैसे दूर करता है?"
         : "Explain in your own words how this addresses your previous misconception.",
@@ -646,26 +652,86 @@ function getFallbackLessonPlan(
     });
   }
 
+  // Pre-configured concept blueprints based on topic keywords
+  const isQuantum = cleanTopic.toLowerCase().includes("quantum") || cleanTopic.toLowerCase().includes("qubit");
+  const isMath = cleanTopic.toLowerCase().includes("calculus") || cleanTopic.toLowerCase().includes("linear") || cleanTopic.toLowerCase().includes("math");
+  
+  const defaultTitlesEn = isQuantum
+    ? [
+        "Quantum Superposition & State Vectors",
+        "Bloch Sphere & Phase Interference",
+        "Quantum Entanglement & Logic Gates",
+        "Measurement Collapse & Observable States",
+        "Practical Quantum Algorithms"
+      ]
+    : isMath
+    ? [
+        "Foundational Definition & Intuitive Limit",
+        "Rate of Change & Geometric Tangents",
+        "Chain Rule & Multivariable Gradients",
+        "Optimization & Extreme Values",
+        "Real-world Physical Applications"
+      ]
+    : [
+        `Foundations & Core Principles of ${cleanTopic}`,
+        `Operational Mechanism & State Transitions in ${cleanTopic}`,
+        `System Architecture & Practical Workflow`,
+        `Edge Cases, Trade-offs & Error Prevention`,
+        `Real-World Implementation & Best Practices`
+      ];
+
+  const defaultTitlesHi = [
+    `${cleanTopic}: मूल सिद्धांत एवं आधारशिला`,
+    `${cleanTopic}: संचालन तंत्र एवं प्रक्रिया`,
+    `${cleanTopic}: वास्तुकला और व्यावहारिक अनुप्रयोग`,
+    `${cleanTopic}: प्रमुख चुनौतियाँ एवं समाधान`,
+    `${cleanTopic}: वास्तविक दुनिया में उपयोग`
+  ];
+
   for (let i = 1; i <= count; i++) {
     const isFeynman = i === 2 || (count === 2 && i === 2);
+    const title = isHi ? defaultTitlesHi[i - 1] || `${cleanTopic} - भाग ${i}` : defaultTitlesEn[i - 1] || `${cleanTopic}: Core Mechanism ${i}`;
+    
+    let visualType: "diagram" | "equation" | "code" | "timeline" = "diagram";
+    let visualContent = "";
+
+    if (isQuantum) {
+      if (i === 1) {
+        visualType = "equation";
+        visualContent = "|\\psi\\rangle = \\alpha|0\\rangle + \\beta|1\\rangle \\quad (\\text{where } |\\alpha|^2 + |\\beta|^2 = 1)";
+      } else if (i === 2) {
+        visualType = "diagram";
+        visualContent = "graph TD\n  State0[|0> Ground State] --> HGate[Hadamard Gate H]\n  HGate --> Superposed[Equal Superposition: |+>]\n  Superposed --> Measure[Measurement Probe]\n  Measure --> Outcome0[50% Probability: 0]\n  Measure --> Outcome1[50% Probability: 1]";
+      } else {
+        visualType = "equation";
+        visualContent = "CNOT|10\\rangle = |11\\rangle \\quad \\text{and} \\quad H = \\frac{1}{\\sqrt{2}}\\begin{pmatrix} 1 & 1 \\\\ 1 & -1 \\end{pmatrix}";
+      }
+    } else {
+      if (i === 1) {
+        visualType = "diagram";
+        visualContent = `graph LR\n  Input[Initial State / Inputs] --> Process[${cleanTopic} Core Mechanism]\n  Process --> Output[Transformed Output / Goal]`;
+      } else if (i === 2) {
+        visualType = "equation";
+        visualContent = "f(x) = \\lim_{\\Delta x \\to 0} \\frac{f(x + \\Delta x) - f(x)}{\\Delta x}";
+      } else {
+        visualType = "code";
+        visualContent = `// Implementation logic for ${cleanTopic}\nfunction executePipeline(state) {\n  const transformed = transform(state);\n  return validate(transformed);\n}`;
+      }
+    }
+
     concepts.push({
-      name: isHi ? `${topic} - अवधारणा ${i}` : `${topic}: Key Principle ${i}`,
+      name: title,
       depth: i === 1 ? depth : "intermediate",
       time_minutes: Math.floor(timeMinutes / count),
-      visual_type: i === 1 ? "diagram" : i === 2 ? "equation" : "code",
-      visual_content:
-        i === 1
-          ? "graph TD\n  A[Core Principle] --> B[Mechanism] --> C[Outcome]"
-          : i === 2
-          ? "E = mc^2"
-          : "def run_pipeline(x):\n    return transform(x)",
+      visual_type: visualType,
+      visual_content: visualContent,
       checkpoint_question: isFeynman
         ? isHi
-          ? `अब अपनी समझ से मुझे समझाइए: यह अवधारणा कैसे काम करती है?`
-          : `Explain it back to me in your own words: how does this principle work?`
+          ? `अब अपनी समझ से मुझे समझाइए: "${title}" कैसे काम करता है?`
+          : `Explain it back to me in your own words: how does "${title}" actually work?`
         : isHi
-        ? `इस अवधारणा का मुख्य उद्देश्य क्या है?`
-        : `What is the primary function of this principle in practice?`,
+        ? `इस सिद्धांत का मुख्य उद्देश्य और संचालन तरीका क्या है?`
+        : `What is the primary function and operating principle of this concept?`,
       interaction_type: isFeynman ? "feynman" : "question",
     });
   }
@@ -680,23 +746,36 @@ function getFallbackLessonPlan(
 
 function getFallbackExplanation(concept: ConceptPlan, chunks: ExtractedConceptChunk[], lang: Language): ExplanationResponse {
   const isHi = lang === "hi";
+  const name = concept.name;
+
+  let spokenText = "";
+  if (isHi) {
+    spokenText = `नमस्ते! आज हम "${name}" की गहराई में उतरेंगे। इसका मूल विचार यह है कि हम जटिल प्रक्रियाओं को सरल घटकों में तोड़कर समझें। ध्यान से देखें कि कैसे प्रत्येक इनपुट एक सुनियोजित तंत्र के माध्यम से अपने अंतिम परिणाम में रूपांतरित होता है।`;
+  } else {
+    if (name.toLowerCase().includes("superposition") || name.toLowerCase().includes("qubit")) {
+      spokenText = `In quantum computing, a qubit doesn't have to be just 0 or 1 like a classical bit. Through superposition, it exists simultaneously in a linear combination of both basis states until we measure it. This allows quantum algorithms to evaluate immense computational paths in parallel.`;
+    } else if (name.toLowerCase().includes("refresher")) {
+      spokenText = `Let's quickly refresh our mental model for ${name.replace(/refresher:?\s*/i, "")}. Rather than memorizing static formulas, think of it as an active transformation where previous inputs directly shape the state transitions.`;
+    } else {
+      spokenText = `Let's break down "${name}". The foundational intuition centers on how state changes happen progressively. Notice on the chalkboard how each component actively channels information to produce the target outcome without unnecessary friction.`;
+    }
+  }
+
   return {
-    spoken_text: isHi
-      ? `नमस्ते! आज हम ${concept.name} के बारे में समझेंगे। यह हमारे विषय का अत्यंत महत्वपूर्ण अंग है। ध्यान से देखें कि यह कैसे काम करता है।`
-      : `Welcome to this concept on ${concept.name}. It forms a foundational building block for our topic. Let us explore its core intuition together.`,
+    spoken_text: spokenText,
     visual_type: concept.visual_type || "diagram",
-    visual_content: concept.visual_content || "graph TD\n  Start[Concept] --> Step[Mechanism] --> Finish[Output]",
+    visual_content: concept.visual_content || `graph LR\n  A[Core Principle] --> B[Operational Mechanism] --> C[Desired Outcome]`,
     citations: chunks.length > 0 ? [chunks[0].concept_name] : [concept.name],
     concept_name: concept.name,
     checkpoint_question:
       concept.checkpoint_question ||
       (concept.interaction_type === "feynman"
         ? isHi
-          ? "अब अपनी समझ से मुझे समझाइए: यह कैसे काम करता है?"
-          : "Now explain it back to me in your own words."
+          ? `अब अपनी समझ से मुझे समझाइए: "${name}" कैसे काम करता है?`
+          : `Now explain it back to me in your own words: how does "${name}" actually work?`
         : isHi
-        ? "इस सिद्धांत का मुख्य लाभ क्या है?"
-        : "What is the primary advantage of this principle?"),
+        ? "इस सिद्धांत का मुख्य लाभ और कार्यप्रणाली क्या है?"
+        : "What is the primary advantage and mechanism of this principle?"),
     interaction_type: concept.interaction_type || "question",
   };
 }
