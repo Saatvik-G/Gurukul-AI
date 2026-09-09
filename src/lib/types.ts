@@ -78,6 +78,7 @@ export interface EvaluationResult {
   suggested_depth?: LearnerDepth;
   classification?: ResponseClassification;
   is_hint?: boolean;
+  new_analogy?: string;
   // Feynman mode specific diagnostics
   understood?: boolean;
   gaps?: string[];
@@ -96,6 +97,7 @@ export interface ExplanationResponse {
   is_reexplanation?: boolean;
   is_hint?: boolean;
   misconception_addressed?: string | null;
+  new_analogy?: string;
 }
 
 export interface LearnerProfile {

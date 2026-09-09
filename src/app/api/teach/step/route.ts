@@ -66,12 +66,28 @@ export async function POST(req: NextRequest) {
       await saveSession(session);
       tDb = performance.now() - tDb0;
 
-      console.log(`[teach/step Timing] action=switch_language sessionId=${sessionId} total=${Math.round(performance.now() - tStart)}ms`);
+      // Generate fresh grounded explanation in target language
+      const queryText = `${currentConcept.name} ${currentConcept.checkpoint_question}`;
+      const queryEmbedding = await generateEmbedding(queryText);
+      const retrievedChunks = await retrieveRelevantChunks(sessionId, queryEmbedding, 2);
+
+      const explanation = await generateGroundedExplanation({
+        concept: currentConcept,
+        retrievedChunks,
+        depth: currentConcept.depth || session.target_depth,
+        language: session.language,
+        lessonTitle: session.title,
+      });
+
+      console.log(`[teach/step Timing] action=switch_language sessionId=${sessionId} lang=${session.language} total=${Math.round(performance.now() - tStart)}ms`);
       return NextResponse.json({
         success: true,
         sessionState: session.state,
         currentConceptIndex: currentIndex,
         language: session.language,
+        explanation,
+        concept: currentConcept,
+        conceptMasteries: session.metadata.conceptMasteries,
         message: `Language switched to ${session.language}`,
       });
     }
@@ -275,6 +291,12 @@ export async function POST(req: NextRequest) {
           language: session.language,
         });
         tGemini += performance.now() - tGemRe;
+
+        if (reExplanation?.new_analogy) {
+          evalResult.new_analogy = reExplanation.new_analogy;
+        } else if (reExplanation?.spoken_text) {
+          evalResult.new_analogy = reExplanation.spoken_text;
+        }
 
         console.log(`[teach/step Timing] action=evaluate path=misconception retrieve=${Math.round(tRetrieve)}ms gemini=${Math.round(tGemini)}ms db=${Math.round(tDb)}ms total=${Math.round(performance.now() - tStart)}ms`);
 
