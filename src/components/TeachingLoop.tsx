@@ -330,8 +330,33 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
         setLastEvaluation(data.evaluation);
         if (data.conceptMasteries) setConceptMasteries(data.conceptMasteries);
 
-        // BRANCH A: INCORRECT / FEYNMAN GAPS -> RE-EXPLAINING
-        if (!data.evaluation.correct && data.reExplanation) {
+        // ====================================================================
+        // BRANCH 1: NON-ANSWER ("I don't know") -> SUPPORTIVE HINT
+        // ====================================================================
+        if (data.isHint && data.hintExplanation) {
+          setCurrentState("hinting");
+          setTeacherMood("encouraging");
+          setCurrentExplanation({
+            ...data.hintExplanation,
+            is_hint: true,
+          });
+          speakText(
+            `${data.evaluation.feedback} ${data.hintExplanation.spoken_text}`,
+            session.language
+          );
+        }
+        // ====================================================================
+        // BRANCH 2: OFF-TOPIC / UNPARSEABLE -> GENTLE REFOCUS
+        // ====================================================================
+        else if (data.isOffTopic) {
+          setCurrentState("questioning");
+          setTeacherMood("explaining");
+          speakText(data.evaluation.feedback, session.language);
+        }
+        // ====================================================================
+        // BRANCH 3A: SUBSTANTIVE INCORRECT -> MISCONCEPTION RE-EXPLANATION
+        // ====================================================================
+        else if (!data.evaluation.correct && data.reExplanation) {
           setCurrentState("reexplaining");
           setTeacherMood("correcting");
           setCurrentExplanation({
@@ -343,7 +368,9 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
             session.language
           );
         }
-        // BRANCH B: CORRECT -> ADAPTING & MOVING FORWARD
+        // ====================================================================
+        // BRANCH 3B: SUBSTANTIVE CORRECT -> ADAPTING & MOVING FORWARD
+        // ====================================================================
         else if (data.evaluation.correct) {
           setTeacherMood("encouraging");
           setCurrentState("adapting");
@@ -490,17 +517,24 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
           />
 
           {/* Checkpoint Question & Student Paper Note Answer */}
+          {/* Checkpoint Question & Student Paper Note Answer */}
           <div className="border border-[#8E9C88]/50 bg-[#1B2D24] p-5 rounded-sm">
             {/* Question Label */}
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span
                 className={`text-xs font-serif-heading font-bold ${
                   currentExplanation?.is_reexplanation
                     ? "text-[#B5482F]"
+                    : currentExplanation?.is_hint
+                    ? "text-[#E3A23B]"
                     : "text-[#E3A23B]"
                 }`}
               >
-                {currentExplanation?.is_reexplanation
+                {currentExplanation?.is_hint
+                  ? isHi
+                    ? "💡 सहायक संकेत एवं मार्गदर्शन (Hint)"
+                    : "💡 Supportive Hint & Scaffolded Step"
+                  : currentExplanation?.is_reexplanation
                   ? isHi
                     ? "💡 नया सादृश्य परीक्षण प्रश्न (पुनर्व्याख्या)"
                     : "💡 Novel Analogy Checkpoint (Re-explanation)"
@@ -512,6 +546,12 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
                   ? "जांच प्रश्न"
                   : "Checkpoint Question"}
               </span>
+
+              {currentExplanation?.is_hint && (
+                <span className="text-[10px] px-2 py-0.5 bg-[#E3A23B] text-[#2A2A26] font-bold rounded-xs">
+                  Supportive Step
+                </span>
+              )}
 
               {currentExplanation?.is_reexplanation && (
                 <span className="text-[10px] px-2 py-0.5 bg-[#B5482F] text-[#F3EFE3] font-bold rounded-xs">
@@ -528,6 +568,18 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
                 "Explain the core principle in your own words."}
             </p>
 
+            {/* Thinking status indicator if processing */}
+            {isProcessing && (
+              <div className="mb-3 p-2.5 bg-[#17251E] border border-[#E3A23B]/60 rounded-xs text-xs text-[#E3A23B] flex items-center gap-2 animate-pulse font-body">
+                <span className="w-2 h-2 rounded-full bg-[#E3A23B] animate-ping" />
+                <span>
+                  {isHi
+                    ? "गुरुकुल शिक्षक आपके उत्तर का विश्लेषण कर रहे हैं..."
+                    : "The Guru is analyzing your answer & updating the chalkboard..."}
+                </span>
+              </div>
+            )}
+
             {/* Student Torn Paper Note Answer Form */}
             <form onSubmit={handleAnswerSubmit} className="space-y-3">
               <div className="torn-note p-3">
@@ -536,7 +588,11 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
                   value={studentAnswer}
                   onChange={(e) => setStudentAnswer(e.target.value)}
                   placeholder={
-                    isFeynmanMode
+                    currentExplanation?.is_hint
+                      ? isHi
+                        ? "संकेत के आधार पर अपना विचार लिखें..."
+                        : "Write your answer based on this hint..."
+                      : isFeynmanMode
                       ? isHi
                         ? "इस अवधारणा को अपनी भाषा में समझाइए, जैसे आप किसी नौसिखिए को पढ़ा रहे हों..."
                         : "Explain this concept back to me in your own words, as if teaching someone new..."
@@ -574,6 +630,8 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
                     ? isHi
                       ? "जांच हो रही है..."
                       : "Evaluating..."
+                    : currentExplanation?.is_hint
+                    ? "Try with hint"
                     : currentExplanation?.is_reexplanation
                     ? "Try another way"
                     : "Answer"}
@@ -584,13 +642,19 @@ export const TeachingLoop: React.FC<TeachingLoopProps> = ({
               {lastEvaluation && (
                 <div
                   className={`p-3 text-xs border rounded-xs font-body ${
-                    lastEvaluation.correct
+                    lastEvaluation.is_hint
                       ? "bg-[#EFE9DA] text-[#2A2A26] border-[#E3A23B]"
+                      : lastEvaluation.correct
+                      ? "bg-[#EFE9DA] text-[#2A2A26] border-[#8E9C88]"
                       : "bg-[#2A1813] text-[#F3EFE3] border-[#B5482F]"
                   }`}
                 >
                   <span className="font-bold mr-1.5">
-                    {lastEvaluation.correct ? "Understood:" : "Correction needed:"}
+                    {lastEvaluation.is_hint
+                      ? "Guidance:"
+                      : lastEvaluation.correct
+                      ? "Understood:"
+                      : "Correction needed:"}
                   </span>
                   <span>{lastEvaluation.feedback}</span>
                   {lastEvaluation.gaps && lastEvaluation.gaps.length > 0 && (

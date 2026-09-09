@@ -19,6 +19,7 @@ const STATE_FLOW: Array<{ key: SessionState; label: string }> = [
   { key: "explaining", label: "Explaining" },
   { key: "questioning", label: "Questioning" },
   { key: "evaluating", label: "Evaluating" },
+  { key: "hinting", label: "Supportive Hint" },
   { key: "reexplaining", label: "Re-explaining" },
   { key: "adapting", label: "Adapting" },
   { key: "done", label: "Mastery" },

@@ -126,23 +126,53 @@ export const AssessmentReport: React.FC<AssessmentReportProps> = ({
 
       {/* Result Breakdown */}
       {assessmentResult && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="p-4 bg-[#EFE9DA] text-[#2A2A26] border border-[#8E9C88] rounded-sm">
-            <div className="font-serif-heading font-bold text-xs text-[#2A2A26] mb-1">
-              Mastered Concepts (समझी गई अवधारणाएं)
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 bg-[#EFE9DA] text-[#2A2A26] border border-[#E3A23B] rounded-sm">
+            <div className="font-serif-heading font-bold text-xs text-[#2A2A26] mb-1 flex items-center justify-between">
+              <span>Mastered Concepts (समझी गई अवधारणाएं)</span>
+              <span className="text-[10px] px-1.5 py-0.5 bg-[#E3A23B] text-[#2A2A26] font-bold rounded-xs">Turmeric</span>
             </div>
             <div className="text-xs space-y-1">
-              {assessmentResult.strong_concepts.map((c, i) => (
-                <div key={i} className="text-[#2A2A26]">• {c}</div>
-              ))}
+              {assessmentResult.strong_concepts && assessmentResult.strong_concepts.length > 0 ? (
+                assessmentResult.strong_concepts.map((c, i) => (
+                  <div key={i} className="text-[#2A2A26]">• {c}</div>
+                ))
+              ) : (
+                <div className="text-[#8E9C88] italic">No concepts mastered yet</div>
+              )}
+            </div>
+          </div>
+
+          <div className="p-4 bg-[#EFE9DA] text-[#2A2A26] border border-[#B5482F] rounded-sm">
+            <div className="font-serif-heading font-bold text-xs text-[#B5482F] mb-1 flex items-center justify-between">
+              <span>Diagnosed Misconceptions (सुधार)</span>
+              <span className="text-[10px] px-1.5 py-0.5 bg-[#B5482F] text-[#F3EFE3] font-bold rounded-xs">Sindoor</span>
+            </div>
+            <div className="text-xs space-y-1">
+              {assessmentResult.misconceptions && assessmentResult.misconceptions.length > 0 ? (
+                assessmentResult.misconceptions.map((c, i) => (
+                  <div key={i} className="text-[#B5482F]">• {c} (flawed model)</div>
+                ))
+              ) : (
+                <div className="text-[#2A2A26]">No active misconceptions diagnosed</div>
+              )}
             </div>
           </div>
 
           <div className="p-4 bg-[#EFE9DA] text-[#2A2A26] border border-[#8E9C88] rounded-sm">
-            <div className="font-serif-heading font-bold text-xs text-[#B5482F] mb-1">
-              Recommended Focus (पुनरावलोकन सुझाव)
+            <div className="font-serif-heading font-bold text-xs text-[#2A2A26] mb-1 flex items-center justify-between">
+              <span>Foundational Review (शुरुआती)</span>
+              <span className="text-[10px] px-1.5 py-0.5 bg-[#8E9C88] text-[#F3EFE3] font-bold rounded-xs">Parchment</span>
             </div>
-            <p className="text-xs text-[#2A2A26]">{assessmentResult.recommended_next}</p>
+            <div className="text-xs space-y-1">
+              {assessmentResult.unexplored_concepts && assessmentResult.unexplored_concepts.length > 0 ? (
+                assessmentResult.unexplored_concepts.map((c, i) => (
+                  <div key={i} className="text-[#2A2A26]">• {c} (unexplored / needed hint)</div>
+                ))
+              ) : (
+                <div className="text-[#2A2A26]">{assessmentResult.recommended_next}</div>
+              )}
+            </div>
           </div>
         </div>
       )}

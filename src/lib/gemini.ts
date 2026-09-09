@@ -9,6 +9,7 @@ import {
   LearnerDepth,
   LessonPlan,
   QuizQuestion,
+  ResponseClassification,
 } from "./types";
 
 const getApiKey = () => process.env.GEMINI_API_KEY || "";
@@ -232,32 +233,48 @@ export async function generateGroundedExplanation({
   try {
     const ai = getGeminiClient();
 
-    const contextText = retrievedChunks
-      .map((c, i) => `[Chunk ${i + 1} - ${c.concept_name}]:\nDefinition: ${c.definition}\n${c.content_chunk}\nExamples: ${c.examples.join(", ")}`)
-      .join("\n\n");
+    // Context Trimming: Bound to top-2 chunks max 1500 chars to minimize latency & token bloat
+    const contextText = (retrievedChunks && retrievedChunks.length > 0)
+      ? retrievedChunks
+          .slice(0, 2)
+          .map((c, i) => `[Chunk ${i + 1} - ${c.concept_name}]:\nDefinition: ${c.definition}\n${c.content_chunk}\nExamples: ${(c.examples || []).join(", ")}`)
+          .join("\n\n")
+          .slice(0, 1500)
+      : concept.name;
+
+    const depthGuideline =
+      depth === "beginner"
+        ? "Beginner Level: Use plain intuitive language, tangible real-world analogies, and zero unexplained technical jargon."
+        : depth === "advanced"
+        ? "Advanced Level: Emphasize rigorous formal mechanics, architectural/mathematical precision, trade-offs, and edge cases."
+        : "Intermediate Level: Explain operational mechanisms, step-by-step causal logic, and clear technical principles.";
 
     const prompt = `You are Gurukul AI, a world-class empathetic tutor delivering an engaging live chalkboard lesson.
 Lesson Topic: ${lessonTitle}
 Current Concept: ${concept.name}
 Target Depth: ${depth}
+Depth Instruction: ${depthGuideline}
 Visual Type: ${concept.visual_type}
 Interaction Mode: ${concept.interaction_type || "question"}
 Language: ${language === "hi" ? "Hindi (Conversational Devanagari)" : "English"}
 
 GROUNDING CONTEXT:
 """
-${contextText || concept.name}
+${contextText}
 """
 
+STRICT GROUNDING RULE:
+Answer and teach strictly and ONLY using the provided retrieved context above. If the context does not cover a specific detail or nuance, plainly state what is covered rather than inventing facts outside the context.
+
 TEACHING INSTRUCTIONS:
-1. "spoken_text": A concise, clear 3-5 sentence explanation designed for spoken delivery.
+1. "spoken_text": A concise, clear 3-5 sentence explanation designed for spoken delivery matching the ${depth} level.
 2. "visual_content": Code/syntax for visual_type:
    - "equation": LaTeX math (e.g., E = mc^2)
    - "diagram": Mermaid.js graph (e.g., graph TD\n A[Input] --> B[Processing] --> C[Output])
    - "code": Clean runnable snippet
    - "timeline": Step 1 -> Step 2 -> Step 3
    - "none": ""
-3. "citations": Short array of cited chunk titles.
+3. "citations": Short array of cited chunk titles (e.g. ["${concept.name}"]).
 4. "checkpoint_question": ${
       concept.interaction_type === "feynman"
         ? language === "hi"
@@ -287,48 +304,146 @@ Output JSON ONLY:
 }
 
 // ============================================================================
-// 5. TEACHING LOOP: ANSWER EVALUATION (Supports Feynman Mode & Gaps)
+// 5. 3-WAY RESPONSE CLASSIFIER & EVALUATION
 // ============================================================================
-export function isAnswerEvasiveOrUncertain(answer: string): boolean {
-  if (!answer || typeof answer !== "string") return true;
-  const cleaned = answer
+
+/**
+ * Classifies student responses into:
+ * 1. "substantive": Genuine answer attempt (to be evaluated).
+ * 2. "non_answer": Student states they don't know, are unsure, empty, or ask for help (triggers supportive hint).
+ * 3. "off_topic": Unrelated chatter, keysmash gibberish, or greeting noise (prompts gentle refocus).
+ */
+export function classifyStudentResponse(
+  studentAnswer: string,
+  language: Language = "en"
+): ResponseClassification {
+  if (!studentAnswer || typeof studentAnswer !== "string") return "non_answer";
+  const cleaned = studentAnswer
     .toLowerCase()
     .trim()
     .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  if (cleaned.length === 0) return true;
+  if (cleaned.length === 0) return "non_answer";
 
-  // Exact or contains evasive/uncertain markers
-  const evasivePatterns = [
+  // Evasive, blank, uncertain, or "I don't know" markers
+  const nonAnswerPatterns = [
     /\b(i\s+)?(do\s+no|do\s+not|dont|don\s*t|didnt|didn\s*t)\s+know\b/,
     /\b(i\s+)?(have\s+no|dont\s+have|don\s*t\s+have|no)\s+(idea|clue|thought)\b/,
     /\b(not\s+sure|im\s+not\s+sure|i\s+am\s+not\s+sure)\b/,
     /\b(idk|dunno|idc|n\/a|na|none)\b/,
     /\b(forgot|cant\s+remember|can\s*t\s+remember|cannot\s+remember)\b/,
     /\b(pass|skip|nothing|no|nope|nah|idontknow)\b/,
+    /\b(tell\s+me|help\s+me|give\s+hint|need\s+hint|hint\s+please)\b/,
     /\b(nahi\s+pata|pata\s+nahi|pata\s+ni|maloom\s+nahi|nahi\s+maloom|nahi\s+janta|mujhe\s+nahi\s+pata)\b/,
     /(पता\s*नहीं|नहीं\s*पता|मालूम\s*नहीं|मुझे\s*नहीं\s*पता|नहीं\s*मालूम|गलत)/,
   ];
 
-  for (const pattern of evasivePatterns) {
+  for (const pattern of nonAnswerPatterns) {
     if (pattern.test(cleaned)) {
-      return true;
+      return "non_answer";
     }
   }
 
-  // Answer is too short to be an explanation (< 6 characters)
-  if (cleaned.length < 6) {
-    return true;
+  // Single punctuation like "?", "??", "...", or extremely short non-answers
+  if (cleaned.length < 4) {
+    return "non_answer";
   }
 
-  // Repeated single character like 'aaaaaa'
-  if (/^(.)\1+$/.test(cleaned)) {
-    return true;
+  // Check for repeated single character like "aaaaaa", "xxxxxx", or keysmash / random consonant clusters
+  if (
+    /^(.)\1+$/.test(cleaned) ||
+    /^([a-z0-9])\1{4,}$/.test(cleaned) ||
+    /(asdf|qwer|zxcv|hjkl|jkl|lkjh|qwerty|blah\s*blah)/i.test(cleaned) ||
+    /(?:[bcdfghjklmnpqrstvwxz]{5,})/i.test(cleaned)
+  ) {
+    return "off_topic";
   }
 
-  return false;
+  // Off-topic greeting or conversational noise ("hello who are you", "what time is it", etc.)
+  const offTopicPatterns = [
+    /\b(hi|hello|hey|who\s+are\s+you|what\s+is\s+your\s+name|how\s+are\s+you|tell\s+me\s+a\s+joke)\b/,
+  ];
+  if (cleaned.split(" ").length <= 4) {
+    for (const pattern of offTopicPatterns) {
+      if (pattern.test(cleaned)) {
+        return "off_topic";
+      }
+    }
+  }
+
+  return "substantive";
+}
+
+// Backward compatibility alias for isAnswerEvasiveOrUncertain
+export function isAnswerEvasiveOrUncertain(answer: string): boolean {
+  return classifyStudentResponse(answer) === "non_answer";
+}
+
+/**
+ * Generates an encouraging supportive hint and scaffolded question when student says "I don't know"
+ */
+export async function generateSupportiveHint({
+  concept,
+  retrievedChunks,
+  depth,
+  language,
+}: {
+  concept: ConceptPlan;
+  retrievedChunks: ExtractedConceptChunk[];
+  depth: LearnerDepth;
+  language: Language;
+}): Promise<ExplanationResponse> {
+  const isHi = language === "hi";
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    return getFallbackSupportiveHint(concept, isHi);
+  }
+
+  try {
+    const ai = getGeminiClient();
+    const contextSnippet = (retrievedChunks && retrievedChunks.length > 0)
+      ? retrievedChunks
+          .slice(0, 2)
+          .map((c) => `${c.concept_name}: ${c.definition} ${c.content_chunk}`)
+          .join("\n")
+          .slice(0, 1500)
+      : concept.name;
+
+    const prompt = `You are Gurukul AI, an encouraging and empathetic master tutor.
+The student indicated they do not know the answer yet or are unsure about "${concept.name}".
+
+STRICT PEDAGOGICAL INSTRUCTIONS:
+1. DO NOT treat this as a wrong answer or misconception. Do NOT scold or sound disappointed.
+2. Provide a warm, encouraging 2-3 sentence intuitive hint or simpler restatement that unlocks the concept step-by-step WITHOUT giving away the entire solution directly.
+3. Level Depth: ${depth}.
+4. Provide a supportive, scaffolded checkpoint question that makes it easy for the student to take their first step.
+5. Language: ${isHi ? "Hindi (Conversational Devanagari)" : "English"}.
+6. STRICT GROUNDING: Ground your hint exclusively on this reference:
+"""
+${contextSnippet}
+"""
+
+Return JSON ONLY:
+{
+  "spoken_text": "string (encouraging supportive hint, 2-3 sentences)",
+  "visual_type": "${concept.visual_type}",
+  "visual_content": "${concept.visual_content || ""}",
+  "citations": ["${concept.name}"],
+  "concept_name": "${concept.name}",
+  "checkpoint_question": "string (simpler, scaffolded checkpoint question)",
+  "interaction_type": "${concept.interaction_type || "question"}",
+  "is_hint": true
+}`;
+
+    const text = await generateContentWithCascade(ai, prompt, true);
+    const parsed = JSON.parse(text) as ExplanationResponse;
+    parsed.is_hint = true;
+    return parsed;
+  } catch (err) {
+    return getFallbackSupportiveHint(concept, isHi);
+  }
 }
 
 export async function evaluateStudentAnswer({
@@ -347,28 +462,41 @@ export async function evaluateStudentAnswer({
   interactionType?: InteractionType;
 }): Promise<EvaluationResult> {
   const isHi = language === "hi";
+  const classification = classifyStudentResponse(studentAnswer, language);
 
-  // Fast-path for evasive / uncertain answers ("i do no know", "idk", "no idea", etc.)
-  if (isAnswerEvasiveOrUncertain(studentAnswer)) {
+  // Fast-path for non-answers ("i don't know", "idk", etc.)
+  if (classification === "non_answer") {
     return {
       understood: false,
-      gaps: [
-        isHi
-          ? "शिक्षार्थी ने अनिश्चितता व्यक्त की या व्याख्या प्रस्तुत नहीं की।"
-          : "Learner expressed uncertainty or did not provide an explanation of the core mechanism."
-      ],
-      praise_point: isHi
-        ? "स्पष्ट रूप से साझा करने के लिए धन्यवाद।"
-        : "Thank you for letting me know where you're at.",
+      gaps: [],
+      praise_point: isHi ? "साझा करने के लिए धन्यवाद।" : "Thank you for letting me know where you're at.",
       correct: false,
-      misconception: isHi
-        ? "अवधारणा की समझ अभी पूरी तरह स्पष्ट नहीं है।"
-        : "Learner indicated they do not know or are unsure of the core mechanism.",
+      misconception: null,
       confidence: 0.99,
       feedback: isHi
-        ? "कोई बात नहीं! आइए इसे एक नए, बहुत ही सरल उदाहरण और सादृश्य से दोबारा समझते हैं।"
-        : "No problem at all! Let's wipe the slate clean and break this down with a fresh, intuitive mental model.",
+        ? "कोई बात नहीं! आइए इसे एक सरल संकेत (Hint) और बुनियादी उदाहरण से समझते हैं।"
+        : "No problem at all! Let's break this down with a simple hint and build it step-by-step.",
       suggested_depth: "beginner",
+      classification: "non_answer",
+      is_hint: true,
+      interaction_type: interactionType,
+    };
+  }
+
+  // Fast-path for off-topic / unparseable
+  if (classification === "off_topic") {
+    return {
+      understood: false,
+      gaps: [],
+      praise_point: "",
+      correct: false,
+      misconception: null,
+      confidence: 0.99,
+      feedback: isHi
+        ? `आइए विषय पर वापस ध्यान केंद्रित करते हैं। क्या आप बता सकते हैं कि "${conceptName}" कैसे काम करता है?`
+        : `Let's focus back on our lesson topic! How would you describe the core mechanism of "${conceptName}"?`,
+      suggested_depth: "beginner",
+      classification: "off_topic",
       interaction_type: interactionType,
     };
   }
@@ -384,20 +512,19 @@ export async function evaluateStudentAnswer({
 
     const prompt = isFeynman
       ? `You are the Feynman diagnostic engine for Gurukul AI.
-The student was asked to explain the concept "${conceptName}" back in their own words.
+The student made a substantive attempt to explain the concept "${conceptName}" back in their own words.
 
 Student's Explanation: """${studentAnswer}"""
-Ground Truth / Reference: """${groundingContext}"""
+Ground Truth / Reference: """${groundingContext.slice(0, 1500)}"""
 Language: ${language === "hi" ? "Hindi" : "English"}
 
 STRICT PEDAGOGICAL GRADING RULES:
 1. Genuine Feynman understanding requires explaining the underlying mechanism/process in their own words.
-2. If the student expresses uncertainty, lack of knowledge (e.g., 'don't know', 'not sure'), gives a tautology, or provides an answer missing the core mechanism, you MUST set "understood": false, "correct": false, and summarize the primary gap in "misconception".
-3. NEVER mark an uncertain, evasive, or shallow response as understood or correct.
-4. "gaps": array of specific missing causal links or conceptual mistakes. If correct, empty array [].
-5. "praise_point": what the student articulated well (or acknowledge their effort).
-6. "feedback": constructive, encouraging guidance in ${language === "hi" ? "Hindi" : "English"}.
-7. "correct": true ONLY if understood is true and gaps are non-critical; false otherwise.
+2. If the explanation contains flawed assumptions or conceptual errors, set "understood": false, "correct": false, and describe the primary flawed mental model in "misconception".
+3. "gaps": array of specific missing causal links or conceptual mistakes. If correct, empty array [].
+4. "praise_point": what the student articulated well.
+5. "feedback": constructive, encouraging guidance in ${language === "hi" ? "Hindi" : "English"}.
+6. "correct": true ONLY if understood is true and gaps are non-critical; false otherwise.
 
 Return ONLY JSON:
 {
@@ -411,17 +538,17 @@ Return ONLY JSON:
   "interaction_type": "feynman"
 }`
       : `You are the diagnostic assessment engine for Gurukul AI.
-Evaluate the student's response to: "${conceptName}".
+Evaluate the student's substantive response to: "${conceptName}".
 
 Question: """${question}"""
 Student's Answer: """${studentAnswer}"""
-Ground Truth: """${groundingContext}"""
+Ground Truth: """${groundingContext.slice(0, 1500)}"""
 Language: ${language === "hi" ? "Hindi" : "English"}
 
 STRICT PEDAGOGICAL GRADING RULES:
-1. If the student's answer expresses lack of knowledge, is incorrect, or is evasive, you MUST set "correct": false and provide a clear "misconception".
-2. NEVER mark 'don't know', 'not sure', blank, or evasive responses as correct under any circumstance.
-3. If correct, "correct": true, "misconception": null.
+1. Evaluate if the answer is factually and conceptually correct based on the Ground Truth.
+2. If incorrect, set "correct": false and provide a clear "misconception" describing their mistake.
+3. If correct, set "correct": true, "misconception": null.
 
 Return ONLY JSON:
 {
@@ -435,10 +562,13 @@ Return ONLY JSON:
 
     const text = await generateContentWithCascade(ai, prompt, true);
     const parsed = JSON.parse(text) as EvaluationResult;
+    parsed.classification = "substantive";
     return parsed;
   } catch (error) {
     console.error("Gemini evaluateStudentAnswer error, using fallback:", error);
-    return getFallbackEvaluation(studentAnswer, interactionType, language);
+    const fb = getFallbackEvaluation(studentAnswer, interactionType, language);
+    fb.classification = "substantive";
+    return fb;
   }
 }
 
@@ -900,6 +1030,23 @@ function getFallbackReExplanation(concept: ConceptPlan, misconception: string, l
   };
 }
 
+function getFallbackSupportiveHint(concept: ConceptPlan, isHi: boolean): ExplanationResponse {
+  return {
+    spoken_text: isHi
+      ? `कोई चिंता नहीं! आइए इसे एक कदम पीछे लेकर बहुत सरल तरीके से देखें। सोचिए कि ${concept.name} कैसे शुरुआती अवस्था से अंतिम परिणाम की ओर बढ़ता है।`
+      : `No worries at all! Let's take a step back and look at the simplest piece first. Think about how ${concept.name} channels an initial input toward the desired outcome.`,
+    visual_type: concept.visual_type || "diagram",
+    visual_content: concept.visual_content || "graph LR\n  Hint[Step 1: Core Input] --> Guide[Step 2: Operational Trigger] --> Goal[Step 3: Outcome]",
+    citations: [concept.name],
+    concept_name: concept.name,
+    checkpoint_question: isHi
+      ? `संकेत के आधार पर: इसका पहला और सबसे बुनियादी कदम क्या है?`
+      : `Based on this hint: what is the very first and most basic step in this mechanism?`,
+    is_hint: true,
+    interaction_type: concept.interaction_type || "question",
+  };
+}
+
 function getFallbackQuizQuestions(concepts: Array<{ name: string }>, lang: Language): QuizQuestion[] {
   const isHi = lang === "hi";
   return concepts.slice(0, 4).map((c, i) => ({
@@ -927,3 +1074,5 @@ function getFallbackQuizQuestions(concepts: Array<{ name: string }>, lang: Langu
       : "Option A is correct because the foundational principle relies on dynamic state transformation.",
   }));
 }
+
+

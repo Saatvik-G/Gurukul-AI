@@ -72,6 +72,26 @@ export async function POST(req: NextRequest) {
       const total = typedQuestions.length || 1;
       const percentage = Math.round((score / total) * 100);
 
+      // Extract session concept attempt signals
+      const sessionAttempts = session?.metadata?.conceptAttempts || {};
+      const sessionMisconceptions: string[] = [];
+      const sessionNonAnswers: string[] = [];
+
+      if (plan?.concepts) {
+        plan.concepts.forEach((c, idx) => {
+          const att = sessionAttempts[idx];
+          if (att === "substantive_misconception") {
+            sessionMisconceptions.push(c.name);
+          } else if (att === "non_answer") {
+            sessionNonAnswers.push(c.name);
+          }
+        });
+      }
+
+      const allWeak = Array.from(new Set([...weakConcepts, ...sessionMisconceptions, ...sessionNonAnswers]));
+      const allMisconceptions = Array.from(new Set([...weakConcepts, ...sessionMisconceptions]));
+      const allUnexplored = Array.from(new Set(sessionNonAnswers.filter((c) => !allMisconceptions.includes(c))));
+
       const isHi = session?.language === "hi";
       const recommendedNext =
         percentage >= 80
@@ -79,8 +99,8 @@ export async function POST(req: NextRequest) {
             ? "उत्कृष्ट प्रदर्शन! आप अगले उन्नत स्तर के मॉड्यूल के लिए तैयार हैं।"
             : "Outstanding mastery! Ready to advance to the next level specialization."
           : isHi
-          ? `सलाह: ${weakConcepts.join(", ")} की मुख्य अवधारणाओं का एक बार फिर पुनरावलोकन करें।`
-          : `Recommendation: Focus on revising ${weakConcepts.join(", ") || "core mechanics"} before taking the mastery challenge.`;
+          ? `सलाह: ${allWeak.join(", ") || "मुख्य अवधारणाओं"} का एक बार फिर पुनरावलोकन करें।`
+          : `Recommendation: Focus on revising ${allWeak.join(", ") || "core mechanics"} before taking the mastery challenge.`;
 
       const assessmentResult: AssessmentResult = {
         session_id: sessionId,
@@ -89,7 +109,9 @@ export async function POST(req: NextRequest) {
         total_questions: total,
         percentage,
         strong_concepts: Array.from(new Set(strongConcepts)),
-        weak_concepts: Array.from(new Set(weakConcepts)),
+        weak_concepts: allWeak,
+        misconceptions: allMisconceptions,
+        unexplored_concepts: allUnexplored,
         recommended_next: recommendedNext,
         detailed_responses: detailedResponses,
         created_at: new Date().toISOString(),
@@ -98,12 +120,12 @@ export async function POST(req: NextRequest) {
       await saveAssessmentResult(assessmentResult);
 
       // Update persistent learner profile
-      await updateLearnerProfile("default_user", strongConcepts, weakConcepts, {
+      await updateLearnerProfile("default_user", strongConcepts, allWeak, {
         session_id: sessionId,
         topic: session?.title || "Mastery Session",
         score: percentage,
         date: new Date().toLocaleDateString(),
-        weak_concepts: Array.from(new Set(weakConcepts)),
+        weak_concepts: allWeak,
       });
 
       const updatedProfile = await getLearnerProfile("default_user");

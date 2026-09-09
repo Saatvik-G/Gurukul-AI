@@ -3,6 +3,7 @@ export type SessionState =
   | "questioning"
   | "evaluating"
   | "reexplaining"
+  | "hinting"
   | "adapting"
   | "done";
 
@@ -10,6 +11,7 @@ export type VisualType = "equation" | "diagram" | "code" | "timeline" | "none";
 export type LearnerDepth = "beginner" | "intermediate" | "advanced";
 export type Language = "en" | "hi";
 export type InteractionType = "question" | "feynman"; // Feynman mode: "explain it back to me in your own words"
+export type ResponseClassification = "substantive" | "non_answer" | "off_topic";
 
 export interface ConceptPlan {
   name: string;
@@ -61,6 +63,7 @@ export interface Session {
     priorWeakConcepts?: string[];
     priorMemoryCallback?: string;
     conceptMasteries?: Record<number, "turmeric" | "sindoor" | "moss">;
+    conceptAttempts?: Record<number, ResponseClassification | "substantive_correct" | "substantive_misconception">;
     [key: string]: any;
   };
   created_at?: string;
@@ -73,6 +76,8 @@ export interface EvaluationResult {
   confidence: number;
   feedback: string;
   suggested_depth?: LearnerDepth;
+  classification?: ResponseClassification;
+  is_hint?: boolean;
   // Feynman mode specific diagnostics
   understood?: boolean;
   gaps?: string[];
@@ -89,6 +94,7 @@ export interface ExplanationResponse {
   checkpoint_question: string;
   interaction_type?: InteractionType;
   is_reexplanation?: boolean;
+  is_hint?: boolean;
   misconception_addressed?: string | null;
 }
 
@@ -97,6 +103,7 @@ export interface LearnerProfile {
   user_id: string;
   strong_concepts: string[];
   weak_concepts: string[];
+  unexplored_concepts?: string[];
   learning_pace: "slow" | "medium" | "fast";
   session_history?: Array<{
     session_id: string;
@@ -104,6 +111,7 @@ export interface LearnerProfile {
     score: number;
     date: string;
     weak_concepts: string[];
+    unexplored_concepts?: string[];
   }>;
   updated_at?: string;
 }
@@ -126,6 +134,8 @@ export interface AssessmentResult {
   percentage: number;
   strong_concepts: string[];
   weak_concepts: string[];
+  misconceptions?: string[];
+  unexplored_concepts?: string[];
   recommended_next: string;
   detailed_responses: Array<{
     question_id: number;
